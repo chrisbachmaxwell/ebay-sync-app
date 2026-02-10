@@ -140,3 +140,43 @@ export const fetchEbayOrder = async (
     accessToken,
   });
 };
+
+export interface EbayShippingFulfillmentInput {
+  lineItems: Array<{
+    lineItemId: string;
+    quantity: number;
+  }>;
+  shippedDate: string; // ISO 8601
+  shippingCarrierCode: string;
+  trackingNumber: string;
+}
+
+/**
+ * Create a shipping fulfillment for an eBay order.
+ * POST /sell/fulfillment/v1/order/{orderId}/shipping_fulfillment
+ */
+export const createShippingFulfillment = async (
+  accessToken: string,
+  orderId: string,
+  fulfillment: EbayShippingFulfillmentInput,
+): Promise<{ fulfillmentId: string }> => {
+  return ebayRequest<{ fulfillmentId: string }>({
+    method: 'POST',
+    path: `/sell/fulfillment/v1/order/${orderId}/shipping_fulfillment`,
+    accessToken,
+    body: fulfillment,
+  });
+};
+
+/**
+ * Get shipping fulfillments for an eBay order.
+ */
+export const getShippingFulfillments = async (
+  accessToken: string,
+  orderId: string,
+): Promise<{ fulfillments: Array<{ fulfillmentId: string; shippedDate: string; trackingNumber?: string }> }> => {
+  return ebayRequest({
+    path: `/sell/fulfillment/v1/order/${orderId}/shipping_fulfillment`,
+    accessToken,
+  });
+};

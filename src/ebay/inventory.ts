@@ -1,4 +1,216 @@
-export const syncEbayInventory = async (): Promise<void> => {
-  // TODO: Implement inventory sync.
-  throw new Error('syncEbayInventory not implemented');
+import { ebayRequest } from './client.js';
+
+/**
+ * eBay Inventory API — manage inventory items and offers.
+ * Docs: https://developer.ebay.com/api-docs/sell/inventory/resources/methods
+ */
+
+export interface EbayInventoryItem {
+  sku: string;
+  locale?: string;
+  product: {
+    title: string;
+    description: string;
+    imageUrls: string[];
+    aspects?: Record<string, string[]>;
+    brand?: string;
+    mpn?: string;
+    upc?: string[];
+    ean?: string[];
+  };
+  condition: string; // NEW, LIKE_NEW, VERY_GOOD, GOOD, ACCEPTABLE, FOR_PARTS_OR_NOT_WORKING
+  conditionDescription?: string;
+  availability: {
+    shipToLocationAvailability: {
+      quantity: number;
+    };
+  };
+  packageWeightAndSize?: {
+    weight?: { value: number; unit: string };
+    dimensions?: {
+      length: number;
+      width: number;
+      height: number;
+      unit: string;
+    };
+  };
+}
+
+export interface EbayOffer {
+  offerId?: string;
+  sku: string;
+  marketplaceId: string; // EBAY_US
+  format: string; // FIXED_PRICE
+  listingDescription?: string;
+  availableQuantity: number;
+  pricingSummary: {
+    price: { value: string; currency: string };
+  };
+  listingPolicies: {
+    fulfillmentPolicyId: string;
+    paymentPolicyId: string;
+    returnPolicyId: string;
+  };
+  categoryId: string;
+  merchantLocationKey?: string;
+  tax?: {
+    applyTax: boolean;
+  };
+}
+
+export interface EbayOfferResponse {
+  offerId: string;
+  listingId?: string;
+  statusCode?: number;
+}
+
+/**
+ * Create or replace an inventory item on eBay.
+ * PUT /sell/inventory/v1/inventory_item/{sku}
+ */
+export const createOrReplaceInventoryItem = async (
+  accessToken: string,
+  sku: string,
+  item: Omit<EbayInventoryItem, 'sku'>,
+): Promise<void> => {
+  await ebayRequest({
+    method: 'PUT',
+    path: `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`,
+    accessToken,
+    body: item,
+    headers: { 'Content-Language': 'en-US' },
+  });
+};
+
+/**
+ * Get an inventory item by SKU.
+ */
+export const getInventoryItem = async (
+  accessToken: string,
+  sku: string,
+): Promise<EbayInventoryItem | null> => {
+  try {
+    return await ebayRequest<EbayInventoryItem>({
+      path: `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`,
+      accessToken,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('404')) return null;
+    throw err;
+  }
+};
+
+/**
+ * Get all inventory items with pagination.
+ */
+export const getInventoryItems = async (
+  accessToken: string,
+  options: { limit?: number; offset?: number } = {},
+): Promise<{ inventoryItems: EbayInventoryItem[]; total: number }> => {
+  const params = new URLSearchParams();
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.offset) params.set('offset', String(options.offset));
+  const query = params.toString();
+
+  return ebayRequest({
+    path: `/sell/inventory/v1/inventory_item${query ? '?' + query : ''}`,
+    accessToken,
+  });
+};
+
+/**
+ * Update the quantity of an inventory item.
+ */
+export const updateInventoryQuantity = async (
+  accessToken: string,
+  sku: string,
+  quantity: number,
+): Promise<void> => {
+  // Get current item first
+  const existing = await getInventoryItem(accessToken, sku);
+  if (!existing) {
+    throw new Error(`Inventory item not found: ${sku}`);
+  }
+
+  // Update with new quantity
+  existing.availability.shipToLocationAvailability.quantity = quantity;
+  const { sku: _sku, ...itemWithoutSku } = existing;
+  await createOrReplaceInventoryItem(accessToken, sku, itemWithoutSku);
+};
+
+/**
+ * Create an offer for an inventory item.
+ * POST /sell/inventory/v1/offer
+ */
+export const createOffer = async (
+  accessToken: string,
+  offer: Omit<EbayOffer, 'offerId'>,
+): Promise<EbayOfferResponse> => {
+  return ebayRequest<EbayOfferResponse>({
+    method: 'POST',
+    path: '/sell/inventory/v1/offer',
+    accessToken,
+    body: offer,
+    headers: { 'Content-Language': 'en-US' },
+  });
+};
+
+/**
+ * Update an existing offer.
+ * PUT /sell/inventory/v1/offer/{offerId}
+ */
+export const updateOffer = async (
+  accessToken: string,
+  offerId: string,
+  offer: Omit<EbayOffer, 'offerId'>,
+): Promise<void> => {
+  await ebayRequest({
+    method: 'PUT',
+    path: `/sell/inventory/v1/offer/${offerId}`,
+    accessToken,
+    body: offer,
+    headers: { 'Content-Language': 'en-US' },
+  });
+};
+
+/**
+ * Publish an offer (makes it a live listing on eBay).
+ * POST /sell/inventory/v1/offer/{offerId}/publish
+ */
+export const publishOffer = async (
+  accessToken: string,
+  offerId: string,
+): Promise<{ listingId: string }> => {
+  return ebayRequest<{ listingId: string }>({
+    method: 'POST',
+    path: `/sell/inventory/v1/offer/${offerId}/publish`,
+    accessToken,
+  });
+};
+
+/**
+ * Get offers for a SKU.
+ */
+export const getOffers = async (
+  accessToken: string,
+  sku: string,
+): Promise<{ offers: EbayOffer[]; total: number }> => {
+  return ebayRequest({
+    path: `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`,
+    accessToken,
+  });
+};
+
+/**
+ * Delete an inventory item.
+ */
+export const deleteInventoryItem = async (
+  accessToken: string,
+  sku: string,
+): Promise<void> => {
+  await ebayRequest({
+    method: 'DELETE',
+    path: `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`,
+    accessToken,
+  });
 };

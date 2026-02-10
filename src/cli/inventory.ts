@@ -1,20 +1,60 @@
 import { Command } from 'commander';
+import ora from 'ora';
+import { syncInventory } from '../sync/inventory-sync.js';
+import { getDb } from '../db/client.js';
+import { authTokens } from '../db/schema.js';
+import { eq } from 'drizzle-orm';
+import { info, error as logError } from '../utils/logger.js';
+
+const getToken = async (platform: string): Promise<string> => {
+  const db = await getDb();
+  const row = await db
+    .select()
+    .from(authTokens)
+    .where(eq(authTokens.platform, platform))
+    .get();
+  if (!row) throw new Error(`No ${platform} auth token. Run: ebaysync auth ${platform}`);
+  return row.accessToken;
+};
 
 export const buildInventoryCommand = () => {
   const inventory = new Command('inventory').description('Inventory commands');
 
   inventory
     .command('sync')
-    .description('Sync inventory levels bidirectionally')
-    .action(() => {
-      console.log('Inventory sync not implemented yet.');
-    });
+    .description('Sync inventory levels from Shopify → eBay')
+    .option('--dry-run', 'Preview changes without applying')
+    .option('--json', 'Output as JSON')
+    .action(async (opts: { dryRun?: boolean; json?: boolean }) => {
+      const spinner = ora('Syncing inventory Shopify → eBay').start();
+      try {
+        const ebayToken = await getToken('ebay');
+        const shopifyToken = await getToken('shopify');
 
-  inventory
-    .command('check')
-    .description('Compare inventory across platforms')
-    .action(() => {
-      console.log('Inventory check not implemented yet.');
+        const result = await syncInventory(ebayToken, shopifyToken, {
+          dryRun: opts.dryRun,
+        });
+
+        spinner.succeed(
+          `Inventory sync: ${result.updated} updated, ${result.skipped} unchanged, ${result.failed} failed`,
+        );
+
+        if (opts.json) {
+          console.log(JSON.stringify(result, null, 2));
+        }
+
+        if (result.errors.length) {
+          logError('Errors:');
+          result.errors.forEach((e) =>
+            logError(`  ${e.sku}: ${e.error}`),
+          );
+        }
+      } catch (err) {
+        spinner.fail(
+          err instanceof Error ? err.message : 'Inventory sync failed',
+        );
+        process.exitCode = 1;
+      }
     });
 
   return inventory;
