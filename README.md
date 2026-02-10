@@ -1,61 +1,144 @@
-# EbaySync - Shopify ↔ eBay Sync Tool
+# ebay-sync-app
 
-CLI-first tool to sync products from UsedCameraGear.com (Shopify) to eBay, and sync eBay orders back to Shopify. Replaces Marketplace Connect (Codisto).
+**Shopify ↔ eBay sync CLI for UsedCameraGear.com**
+
+Replaces Marketplace Connect (Codisto) with a standalone, CLI-first tool that syncs products, orders, inventory, prices, and fulfillment between Shopify and eBay.
+
+## Features
+
+| Feature | Direction | Command |
+|---------|-----------|---------|
+| **Order sync** | eBay → Shopify | `ebaysync orders sync` |
+| **Product listing** | Shopify → eBay | `ebaysync products sync` |
+| **Inventory sync** | Shopify → eBay | `ebaysync inventory sync` |
+| **Price sync** | Shopify → eBay | `ebaysync sync` |
+| **Fulfillment sync** | Shopify → eBay | `ebaysync sync` |
+| **Full sync** | Both directions | `ebaysync sync` |
+| **Watch mode** | Continuous polling | `ebaysync sync --watch 10` |
+
+## Quick Start
+
+```bash
+# Install dependencies
+npm install
+
+# Build
+npm run build
+
+# Authenticate
+ebaysync auth shopify    # Get Shopify access token
+ebaysync auth ebay       # eBay OAuth consent flow (one-time)
+
+# Check status
+ebaysync status
+
+# Run full sync
+ebaysync sync
+
+# Dry run (preview without changes)
+ebaysync sync --dry-run
+
+# Sync only orders since a date
+ebaysync orders sync --since 2026-02-01
+
+# Watch mode — poll every 10 minutes
+ebaysync sync --watch 10
+```
 
 ## Architecture
 
-- **TypeScript** with Commander.js CLI
-- **Shopify Admin API** (GraphQL) for product/order/inventory management
-- **eBay APIs**: Browse, Inventory, Trading, Fulfillment
-- **SQLite** local database for sync state tracking
-- **Node.js 20+**
+```
+src/
+├── cli/           # CLI commands (commander)
+│   ├── index.ts   # Main entry + top-level sync command
+│   ├── auth.ts    # auth shopify / auth ebay / auth status
+│   ├── products.ts # products list / products sync
+│   ├── orders.ts  # orders sync / orders list
+│   ├── inventory.ts # inventory sync
+│   └── status.ts  # Dashboard with counts + activity
+├── ebay/          # eBay API clients
+│   ├── client.ts  # Base HTTP client + token exchange
+│   ├── auth.ts    # OAuth consent flow (manual + local server)
+│   ├── fulfillment.ts # Fulfillment API (orders + shipping)
+│   ├── inventory.ts   # Inventory API (items + offers)
+│   ├── browse.ts  # Browse API (search listings)
+│   ├── trading.ts # Account API (business policies)
+│   └── token-manager.ts # Auto-refresh expired tokens
+├── shopify/       # Shopify API clients
+│   ├── client.ts  # GraphQL + REST client setup
+│   ├── products.ts # Product fetching
+│   ├── orders.ts  # Order creation + dedup search
+│   └── inventory.ts # Inventory levels + locations
+├── sync/          # Sync engines
+│   ├── order-sync.ts      # eBay → Shopify order import
+│   ├── product-sync.ts    # Shopify → eBay listing creation
+│   ├── inventory-sync.ts  # Shopify → eBay quantity sync
+│   ├── price-sync.ts      # Shopify → eBay price sync
+│   ├── fulfillment-sync.ts # Shopify → eBay shipping updates
+│   └── mapper.ts          # Field mapping (condition, category, carrier)
+├── db/            # SQLite database (better-sqlite3 + drizzle-orm)
+│   ├── client.ts  # DB connection + table init
+│   └── schema.ts  # Drizzle schema definitions
+├── config/        # Credential loading
+│   └── credentials.ts
+└── utils/
+    ├── logger.ts  # Colored logging
+    └── retry.ts   # Retry with backoff
+```
 
 ## Credentials
 
-All stored in `~/.clawdbot/credentials/`:
-- `ebay-api.txt` - eBay App ID, Dev ID, Cert ID
-- `shopify-usedcameragear-api.txt` - Shopify Client ID + Secret
+Stored in `~/.clawdbot/credentials/`:
 
-## Commands
+- `ebay-api.txt` — eBay App ID, Dev ID, Cert ID, RuName
+- `shopify-usedcameragear-api.txt` — Shopify Client ID + Secret
 
-```bash
-# Authentication
-ebaysync auth shopify     # OAuth flow for Shopify access token
-ebaysync auth ebay        # OAuth flow for eBay user token
-ebaysync auth status      # Check auth status for both platforms
+## Database
 
-# Products
-ebaysync products list              # List Shopify products
-ebaysync products sync              # Sync Shopify products → eBay listings
-ebaysync products sync --dry-run    # Preview what would be synced
-ebaysync products sync --sku ABC    # Sync specific product
+SQLite at `~/.clawdbot/ebaysync.db` with tables:
+- `auth_tokens` — OAuth tokens for both platforms
+- `product_mappings` — Shopify product ↔ eBay listing links
+- `order_mappings` — eBay order ↔ Shopify order links (dedup)
+- `sync_log` — Audit trail of all sync operations
 
-# Orders
-ebaysync orders poll                # Poll eBay for new orders
-ebaysync orders sync                # Sync eBay orders → Shopify
-ebaysync orders sync --dry-run      # Preview order sync
+## How It Works
 
-# Inventory
-ebaysync inventory sync             # Sync inventory levels bidirectionally
-ebaysync inventory check            # Compare inventory across platforms
+### Order Sync (eBay → Shopify)
+1. Fetch orders from eBay Fulfillment API
+2. Check local DB for existing mapping (fast dedup)
+3. Check Shopify for existing order by tag (belt + suspenders)
+4. Create Shopify order with eBay details (customer, items, shipping)
+5. Tag order with `eBay,eBay-{orderId}` for future dedup
+6. Suppress email notifications (no double emails to customer)
 
-# Status
-ebaysync status                     # Overall sync health
-```
+### Inventory Sync (Shopify → eBay)
+1. Get all product mappings from DB
+2. Fetch current Shopify quantities
+3. Fetch current eBay quantities
+4. Update eBay if different
 
-## Flags (all commands)
-- `--json` - JSON output for automation
-- `--dry-run` - Preview changes without applying
-- `--verbose` - Detailed logging
+### Price Sync (Shopify → eBay)
+1. Get all product mappings from DB
+2. Compare Shopify variant prices with eBay offer prices
+3. Update eBay offers where price differs
 
-## Store Details
-- **Shopify Store**: usedcameragear.myshopify.com (usedcameragear.com)
-- **eBay Account**: Connected via TradeInManager app credentials
-- **Product Types**: Used camera gear (cameras, lenses, accessories)
+### Fulfillment Sync (Shopify → eBay)
+1. Get synced (unfulfilled) order mappings
+2. Check Shopify for fulfillments with tracking
+3. Create eBay shipping fulfillment with carrier + tracking number
+4. Mark order mapping as fulfilled
 
-## Development
-```bash
-npm install
-npm run build
-npm link  # Makes `ebaysync` available globally
-```
+## eBay Account
+
+- **Seller:** usedcam-0 (https://www.ebay.com/usr/usedcam-0)
+- **Location:** 305 W 700 S, Salt Lake City, UT 84101
+- **Connected via:** Marketplace Connect (Codisto) — being replaced by this app
+
+## Tech Stack
+
+- TypeScript
+- Commander (CLI framework)
+- better-sqlite3 + drizzle-orm (local state DB)
+- @shopify/shopify-api (Shopify client)
+- Native fetch (eBay REST APIs)
+- ora (spinners), chalk (colors)
