@@ -5,33 +5,38 @@ export const productMappings = sqliteTable('product_mappings', {
   shopifyProductId: text('shopify_product_id').notNull(),
   ebayListingId: text('ebay_listing_id').notNull(),
   ebayInventoryItemId: text('ebay_inventory_item_id'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().defaultNow(),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().defaultNow(),
+  status: text('status').default('active'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
 export const orderMappings = sqliteTable('order_mappings', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  ebayOrderId: text('ebay_order_id').notNull(),
+  ebayOrderId: text('ebay_order_id').notNull().unique(),
   shopifyOrderId: text('shopify_order_id').notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().defaultNow(),
+  shopifyOrderName: text('shopify_order_name'),
+  status: text('status').default('synced'),
+  syncedAt: integer('synced_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
 export const syncLog = sqliteTable('sync_log', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  entityType: text('entity_type').notNull(),
-  action: text('action').notNull(),
-  status: text('status').notNull(),
-  message: text('message'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().defaultNow(),
+  direction: text('direction').notNull(), // ebay_to_shopify, shopify_to_ebay
+  entityType: text('entity_type').notNull(), // order, product, inventory
+  entityId: text('entity_id').notNull(),
+  status: text('status').notNull(), // success, failed
+  detail: text('detail'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
 export const authTokens = sqliteTable('auth_tokens', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  platform: text('platform').notNull(),
+  platform: text('platform').notNull().unique(), // shopify, ebay
   accessToken: text('access_token').notNull(),
   refreshToken: text('refresh_token'),
   scope: text('scope'),
   expiresAt: integer('expires_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().defaultNow(),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().defaultNow(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });

@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import ora from 'ora';
 import { requestShopifyClientCredentialsToken } from '../shopify/client.js';
 import { exchangeEbayAuthCode } from '../ebay/client.js';
-import { startEbayAuthFlow } from '../ebay/auth.js';
+import { startEbayAuthFlow, startEbayAuthFlowManual } from '../ebay/auth.js';
 import { getDb } from '../db/client.js';
 import { authTokens } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
@@ -13,14 +13,18 @@ const EBAY_SCOPES = [
   'https://api.ebay.com/oauth/api_scope/sell.inventory',
   'https://api.ebay.com/oauth/api_scope/sell.fulfillment',
   'https://api.ebay.com/oauth/api_scope/sell.account',
+  'https://api.ebay.com/oauth/api_scope/sell.marketing',
 ];
 
-const upsertToken = async (platform: string, token: {
-  accessToken: string;
-  refreshToken?: string;
-  scope?: string;
-  expiresIn: number;
-}) => {
+const upsertToken = async (
+  platform: string,
+  token: {
+    accessToken: string;
+    refreshToken?: string;
+    scope?: string;
+    expiresIn: number;
+  },
+) => {
   const db = await getDb();
   const existing = await db
     .select()
@@ -61,7 +65,11 @@ const upsertToken = async (platform: string, token: {
 
 const fetchToken = async (platform: string) => {
   const db = await getDb();
-  return db.select().from(authTokens).where(eq(authTokens.platform, platform)).get();
+  return db
+    .select()
+    .from(authTokens)
+    .where(eq(authTokens.platform, platform))
+    .get();
 };
 
 export const buildAuthCommand = () => {
@@ -74,10 +82,15 @@ export const buildAuthCommand = () => {
       const spinner = ora('Requesting Shopify access token').start();
       try {
         const accessToken = await requestShopifyClientCredentialsToken();
-        await upsertToken('shopify', { accessToken, expiresIn: 24 * 60 * 60 });
+        await upsertToken('shopify', {
+          accessToken,
+          expiresIn: 24 * 60 * 60,
+        });
         spinner.succeed('Shopify access token saved');
       } catch (error) {
-        spinner.fail(error instanceof Error ? error.message : 'Shopify auth failed');
+        spinner.fail(
+          error instanceof Error ? error.message : 'Shopify auth failed',
+        );
         process.exitCode = 1;
       }
     });
@@ -85,10 +98,33 @@ export const buildAuthCommand = () => {
   auth
     .command('ebay')
     .description('OAuth flow for eBay user token')
-    .action(async () => {
-      const spinner = ora('Starting eBay authorization').start();
+    .option(
+      '--manual',
+      'Manual mode: paste auth code from browser (default if no RuName with localhost)',
+    )
+    .option(
+      '--local',
+      'Local server mode: start localhost callback server',
+    )
+    .action(async (opts: { manual?: boolean; local?: boolean }) => {
       try {
-        const { code, redirectUri } = await startEbayAuthFlow(EBAY_SCOPES);
+        let code: string;
+        let redirectUri: string;
+
+        if (opts.local) {
+          const spinner = ora('Starting eBay authorization (local server)').start();
+          spinner.info('Waiting for eBay callback...');
+          const result = await startEbayAuthFlow(EBAY_SCOPES);
+          code = result.code;
+          redirectUri = result.redirectUri;
+        } else {
+          // Default to manual mode
+          const result = await startEbayAuthFlowManual(EBAY_SCOPES);
+          code = result.code;
+          redirectUri = result.redirectUri;
+        }
+
+        const spinner = ora('Exchanging auth code for token').start();
         const token = await exchangeEbayAuthCode(code, redirectUri);
         await upsertToken('ebay', {
           accessToken: token.accessToken,
@@ -97,8 +133,14 @@ export const buildAuthCommand = () => {
           expiresIn: token.expiresIn,
         });
         spinner.succeed('eBay user token saved');
+        info(`Token expires in ${Math.round(token.expiresIn / 3600)} hours`);
+        if (token.refreshToken) {
+          info('Refresh token saved — will auto-refresh when expired');
+        }
       } catch (error) {
-        spinner.fail(error instanceof Error ? error.message : 'eBay auth failed');
+        console.error(
+          error instanceof Error ? error.message : 'eBay auth failed',
+        );
         process.exitCode = 1;
       }
     });
@@ -106,12 +148,52 @@ export const buildAuthCommand = () => {
   auth
     .command('status')
     .description('Check auth status for both platforms')
-    .action(async () => {
+    .option('--json', 'Output as JSON')
+    .action(async (opts: { json?: boolean }) => {
       const shopify = await fetchToken('shopify');
       const ebay = await fetchToken('ebay');
 
-      info(`Shopify: ${shopify ? 'connected' : 'missing'}`);
-      info(`eBay: ${ebay ? 'connected' : 'missing'}`);
+      const now = new Date();
+      const shopifyExpired = shopify?.expiresAt
+        ? shopify.expiresAt < now
+        : false;
+      const ebayExpired = ebay?.expiresAt ? ebay.expiresAt < now : false;
+
+      if (opts.json) {
+        console.log(
+          JSON.stringify(
+            {
+              shopify: shopify
+                ? {
+                    connected: true,
+                    expired: shopifyExpired,
+                    expiresAt: shopify.expiresAt?.toISOString(),
+                  }
+                : { connected: false },
+              ebay: ebay
+                ? {
+                    connected: true,
+                    expired: ebayExpired,
+                    expiresAt: ebay.expiresAt?.toISOString(),
+                    hasRefreshToken: !!ebay.refreshToken,
+                  }
+                : { connected: false },
+            },
+            null,
+            2,
+          ),
+        );
+      } else {
+        info(
+          `Shopify: ${shopify ? (shopifyExpired ? '⚠️ expired' : '✅ connected') : '❌ not connected'}`,
+        );
+        info(
+          `eBay:    ${ebay ? (ebayExpired ? '⚠️ expired' : '✅ connected') : '❌ not connected'}`,
+        );
+        if (ebay?.refreshToken) {
+          info('  ↳ Has refresh token');
+        }
+      }
     });
 
   return auth;

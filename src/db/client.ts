@@ -22,26 +22,31 @@ const initTables = (sqlite: InstanceType<typeof Database>) => {
       shopify_product_id TEXT NOT NULL,
       ebay_listing_id TEXT NOT NULL,
       ebay_inventory_item_id TEXT,
+      status TEXT DEFAULT 'active',
       created_at INTEGER NOT NULL DEFAULT (unixepoch()),
       updated_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
     CREATE TABLE IF NOT EXISTS order_mappings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      ebay_order_id TEXT NOT NULL,
+      ebay_order_id TEXT NOT NULL UNIQUE,
       shopify_order_id TEXT NOT NULL,
+      shopify_order_name TEXT,
+      status TEXT DEFAULT 'synced',
+      synced_at INTEGER,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
     CREATE TABLE IF NOT EXISTS sync_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      direction TEXT NOT NULL,
       entity_type TEXT NOT NULL,
-      action TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
       status TEXT NOT NULL,
-      message TEXT,
+      detail TEXT,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
     CREATE TABLE IF NOT EXISTS auth_tokens (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      platform TEXT NOT NULL,
+      platform TEXT NOT NULL UNIQUE,
       access_token TEXT NOT NULL,
       refresh_token TEXT,
       scope TEXT,
