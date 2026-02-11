@@ -11,7 +11,15 @@ import { getDb } from '../db/client.js';
 import { productMappings, syncLog } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { info, warn, error as logError } from '../utils/logger.js';
-import { mapCondition, mapCategory } from '../sync/mapping-service.js';
+import { 
+  getEbayCondition,
+  getEbayUPC,
+  getEbayTitle,
+  getEbayDescription,
+  getEbayHandlingTime,
+  getMapping,
+  resolveMapping 
+} from '../sync/attribute-mapping-service.js';
 import { cleanTitle, parsePrice } from './mapper.js';
 
 export interface ProductSyncResult {
@@ -39,7 +47,7 @@ const DEFAULT_POLICIES = {
 const DEFAULT_LOCATION = '305 W 700 S, Salt Lake City, UT 84101';
 
 /**
- * Map a Shopify product to eBay inventory item and offer.
+ * Map a Shopify product to eBay inventory item and offer using attribute mappings.
  */
 const mapShopifyProductToEbay = async (
   shopifyProduct: any,
@@ -47,15 +55,24 @@ const mapShopifyProductToEbay = async (
   settings: Record<string, string>,
 ): Promise<{ inventoryItem: Omit<EbayInventoryItem, 'sku'>; offer: Omit<EbayOffer, 'offerId' | 'sku'> }> => {
   
-  const condition = await mapCondition(shopifyProduct.tags);
-  const categoryId = await mapCategory(shopifyProduct.productType);
+  // Use attribute mapping service to get mapped values
+  const conditionId = await getEbayCondition(shopifyProduct);
+  const upc = await getEbayUPC(shopifyProduct);
+  const title = await getEbayTitle(shopifyProduct);
+  const description = await getEbayDescription(shopifyProduct);
+  const handlingTime = await getEbayHandlingTime(shopifyProduct);
+  
+  // Get category from mapping or use default
+  const categoryMapping = await getMapping('listing', 'primary_category');
+  const categoryId = await resolveMapping(categoryMapping, shopifyProduct) || '48519'; // Default: Other Camera Accessories
+  
   const price = parsePrice(variant.price);
   const quantity = Math.max(0, variant.inventoryQuantity || 0);
   
-  // Clean up description
-  let description = shopifyProduct.description || shopifyProduct.title;
-  if (description.length > 2000) {
-    description = description.slice(0, 1997) + '...';
+  // Clean up description if needed
+  let finalDescription = description;
+  if (finalDescription.length > 2000) {
+    finalDescription = finalDescription.slice(0, 1997) + '...';
   }
   
   // Build image URLs (eBay wants HTTPS)
@@ -63,15 +80,19 @@ const mapShopifyProductToEbay = async (
     .slice(0, 12)  // eBay max 12 images
     .map((img: any) => img.url.replace(/^http:/, 'https:'));
 
+  // Get condition description
+  const conditionDesc = await getConditionDescription(conditionId, shopifyProduct);
+
   const inventoryItem: Omit<EbayInventoryItem, 'sku'> = {
     product: {
-      title: cleanTitle(shopifyProduct.title),
-      description,
+      title: cleanTitle(title),
+      description: finalDescription,
       imageUrls,
       brand: shopifyProduct.vendor || undefined,
+      upc: upc ? [upc] : undefined, // eBay expects UPC as array
     },
-    condition,
-    conditionDescription: condition === 'GOOD' ? 'Used but in good working condition' : undefined,
+    condition: mapConditionIdToText(conditionId),
+    conditionDescription: conditionDesc,
     availability: {
       shipToLocationAvailability: {
         quantity,
@@ -107,6 +128,46 @@ const mapShopifyProductToEbay = async (
   };
 
   return { inventoryItem, offer };
+};
+
+/**
+ * Map eBay condition ID to condition text that eBay API expects.
+ */
+const mapConditionIdToText = (conditionId: string): string => {
+  switch (conditionId) {
+    case '1000':
+      return 'NEW';
+    case '1500':
+      return 'NEW_OTHER';
+    case '3000':
+      return 'USED_EXCELLENT';
+    case '7000':
+      return 'FOR_PARTS_OR_NOT_WORKING';
+    default:
+      return 'USED_EXCELLENT';
+  }
+};
+
+/**
+ * Get condition description based on mapping or default.
+ */
+const getConditionDescription = async (conditionId: string, shopifyProduct: any): Promise<string | undefined> => {
+  const conditionDescMapping = await getMapping('listing', 'condition_description');
+  const mappedDesc = await resolveMapping(conditionDescMapping, shopifyProduct);
+  
+  if (mappedDesc) {
+    return mappedDesc;
+  }
+  
+  // Default descriptions based on condition
+  switch (conditionId) {
+    case '3000':
+      return 'Used but in good working condition';
+    case '1500':
+      return 'New item with minor cosmetic imperfections';
+    default:
+      return undefined;
+  }
 };
 
 /**
