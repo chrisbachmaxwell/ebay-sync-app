@@ -9,7 +9,8 @@ router.get('/auth', async (req: Request, res: Response) => {
   try {
     const creds = await loadShopifyCredentials();
     const shop = (req.query.shop as string) || creds.storeDomain;
-    const appUrl = `${req.protocol}://${req.get('host')}`;
+    const proto = req.get('x-forwarded-proto') || req.protocol;
+    const appUrl = `${proto}://${req.get('host')}`;
     const redirectUri = `${appUrl}/auth/callback`;
 
     const scopes = [
@@ -82,7 +83,8 @@ router.get('/auth/callback', async (req: Request, res: Response) => {
     info(`[Shopify Auth] Authenticated with ${shop}. Scopes: ${tokenData.scope}`);
 
     try {
-      await registerWebhooks(shop as string, accessToken, `${req.protocol}://${req.get('host')}`);
+      const cbProto = req.get('x-forwarded-proto') || req.protocol;
+      await registerWebhooks(shop as string, accessToken, `${cbProto}://${req.get('host')}`);
     } catch (err) {
       logError(`[Shopify Auth] Webhook registration failed: ${err}`);
     }
