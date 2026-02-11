@@ -173,8 +173,10 @@ router.get('/ebay/auth/status', async (_req: Request, res: Response) => {
  */
 router.delete('/ebay/auth', async (_req: Request, res: Response) => {
   try {
-    const db = await getRawDb();
-    db.prepare("DELETE FROM auth_tokens WHERE platform = 'ebay'").run();
+    const db = await getDb();
+    const { authTokens } = await import('../../db/schema.js');
+    const { eq } = await import('drizzle-orm');
+    await db.delete(authTokens).where(eq(authTokens.platform, 'ebay')).run();
     info('[eBay Auth] Token cleared successfully');
     res.json({ ok: true, message: 'eBay token cleared. Re-authorize at /ebay/auth' });
   } catch (err) {
