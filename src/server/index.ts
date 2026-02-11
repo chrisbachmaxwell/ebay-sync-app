@@ -196,27 +196,9 @@ function seedDefaultSettings(db: import('better-sqlite3').Database) {
  * Background sync scheduler — fallback polling every N minutes
  */
 function startSyncScheduler(db: import('better-sqlite3').Database) {
-  const getInterval = (): number => {
-    try {
-      const row = db.prepare(`SELECT value FROM settings WHERE key = 'sync_interval_minutes'`).get() as any;
-      return (parseInt(row?.value) || 5) * 60 * 1000;
-    } catch {
-      return 5 * 60 * 1000;
-    }
-  };
-
-  // Run first sync after 30 seconds
-  setTimeout(async () => {
-    info('[Scheduler] Running initial background sync...');
-    await runBackgroundSync();
-  }, 30_000);
-
-  // Then run on interval
-  setInterval(async () => {
-    await runBackgroundSync();
-  }, getInterval());
-
-  info(`[Scheduler] Background sync every ${getInterval() / 60000} minutes`);
+  // AUTO-SYNC DISABLED — re-enable after dedup logic is implemented
+  info('[Scheduler] Auto-sync is DISABLED. Use POST /api/sync/trigger for manual syncs.');
+  return;
 }
 
 async function runBackgroundSync() {
