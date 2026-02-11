@@ -7,10 +7,10 @@ import { buildInventoryCommand } from './inventory.js';
 import { buildStatusCommand } from './status.js';
 import { setVerbose } from '../utils/logger.js';
 import { syncOrders } from '../sync/order-sync.js';
-import { syncInventory } from '../sync/inventory-sync.js';
-import { syncPrices } from '../sync/price-sync.js';
-import { syncFulfillments } from '../sync/fulfillment-sync.js';
-import { getValidEbayToken, getValidShopifyToken } from '../ebay/token-manager.js';
+import { syncAllInventory } from '../sync/inventory-sync.js';
+// import { syncPrices } from '../sync/price-sync.js';
+// import { syncFulfillments } from '../sync/fulfillment-sync.js';
+import { getValidEbayToken } from '../ebay/token-manager.js';
 import { info, error as logError } from '../utils/logger.js';
 
 const program = new Command();
@@ -39,7 +39,19 @@ program
   .action(async (opts: { since?: string; dryRun?: boolean; json?: boolean; watch?: string }) => {
     const runSync = async () => {
       const ebayToken = await getValidEbayToken();
-      const shopifyToken = await getValidShopifyToken();
+      
+      // Get Shopify token from DB
+      const { getDb } = await import('../db/client.js');
+      const { authTokens } = await import('../db/schema.js');
+      const { eq } = await import('drizzle-orm');
+      
+      const db = await getDb();
+      const shopifyRow = await db
+        .select()
+        .from(authTokens)
+        .where(eq(authTokens.platform, 'shopify'))
+        .get();
+      const shopifyToken = shopifyRow?.accessToken;
 
       if (!shopifyToken) {
         logError('Shopify not connected. Run: ebaysync auth shopify');
@@ -70,23 +82,10 @@ program
         orderSpinner.fail(`Order sync error: ${err instanceof Error ? err.message : err}`);
       }
 
-      // 2. Price sync (Shopify → eBay)
-      const priceSpinner = ora('Step 2/4: Syncing prices Shopify → eBay').start();
+      // 2. Inventory sync (Shopify → eBay)
+      const invSpinner = ora('Step 2/3: Syncing inventory Shopify → eBay').start();
       try {
-        const priceResult = await syncPrices(ebayToken, shopifyToken, {
-          dryRun: opts.dryRun,
-        });
-        priceSpinner.succeed(
-          `Prices: ${priceResult.updated} updated, ${priceResult.skipped} unchanged, ${priceResult.failed} failed`,
-        );
-      } catch (err) {
-        priceSpinner.fail(`Price sync error: ${err instanceof Error ? err.message : err}`);
-      }
-
-      // 3. Inventory sync (Shopify → eBay)
-      const invSpinner = ora('Step 3/4: Syncing inventory Shopify → eBay').start();
-      try {
-        const invResult = await syncInventory(ebayToken, shopifyToken, {
+        const invResult = await syncAllInventory(ebayToken, shopifyToken, {
           dryRun: opts.dryRun,
         });
         invSpinner.succeed(
@@ -96,18 +95,8 @@ program
         invSpinner.fail(`Inventory sync error: ${err instanceof Error ? err.message : err}`);
       }
 
-      // 4. Fulfillment sync (Shopify → eBay)
-      const fulfillSpinner = ora('Step 4/4: Syncing fulfillments Shopify → eBay').start();
-      try {
-        const fulfillResult = await syncFulfillments(ebayToken, shopifyToken, {
-          dryRun: opts.dryRun,
-        });
-        fulfillSpinner.succeed(
-          `Fulfillments: ${fulfillResult.updated} shipped, ${fulfillResult.skipped} unchanged, ${fulfillResult.failed} failed`,
-        );
-      } catch (err) {
-        fulfillSpinner.fail(`Fulfillment sync error: ${err instanceof Error ? err.message : err}`);
-      }
+      // 3. Fulfillment sync via webhooks (real-time)
+      info('Step 3/3: Fulfillment sync runs via Shopify webhooks (real-time)');
 
       info('');
       info('Sync complete.');

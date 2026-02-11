@@ -183,6 +183,7 @@ function seedDefaultSettings(db: import('better-sqlite3').Database) {
     sync_inventory: 'true',
     auto_list: 'false',
     sync_interval_minutes: '5',
+    auto_sync_enabled: 'false',  // MUST be explicitly enabled
     item_location: '305 W 700 S, Salt Lake City, UT 84101',
   };
 
@@ -196,17 +197,43 @@ function seedDefaultSettings(db: import('better-sqlite3').Database) {
  * Background sync scheduler — fallback polling every N minutes
  */
 function startSyncScheduler(db: import('better-sqlite3').Database) {
-  // AUTO-SYNC DISABLED — re-enable after dedup logic is implemented
-  info('[Scheduler] Auto-sync is DISABLED. Use POST /api/sync/trigger for manual syncs.');
-  return;
+  const checkInterval = setInterval(async () => {
+    try {
+      // Read setting from DB (don't cache it)
+      const setting = db.prepare(`SELECT value FROM settings WHERE key = 'auto_sync_enabled'`).get() as any;
+      const autoSyncEnabled = setting?.value === 'true';
+      
+      if (!autoSyncEnabled) {
+        return; // Auto-sync disabled, skip silently
+      }
+      
+      const intervalSetting = db.prepare(`SELECT value FROM settings WHERE key = 'sync_interval_minutes'`).get() as any;
+      const intervalMinutes = parseInt(intervalSetting?.value || '5', 10);
+      
+      info(`[Scheduler] Running auto-sync (interval: ${intervalMinutes} minutes)`);
+      await runBackgroundSync();
+      
+    } catch (err) {
+      logError(`[Scheduler] Auto-sync check error: ${err}`);
+    }
+  }, 60000); // Check every minute
+  
+  info('[Scheduler] Auto-sync scheduler started. Enable with setting auto_sync_enabled=true');
+  
+  // Clean up on process exit
+  process.on('SIGTERM', () => clearInterval(checkInterval));
+  process.on('SIGINT', () => clearInterval(checkInterval));
 }
 
 async function runBackgroundSync() {
   try {
     const { runOrderSync } = await import('./sync-helper.js');
+    // Only sync orders from the last 24 hours for auto-sync
     const result = await runOrderSync({ dryRun: false });
-    if (result && result.imported > 0) {
-      info(`[Scheduler] Background sync: ${result.imported} orders imported`);
+    if (result) {
+      info(`[Scheduler] Background sync complete: ${result.imported} imported, ${result.skipped} skipped, ${result.failed} failed`);
+    } else {
+      info(`[Scheduler] Background sync skipped (no tokens configured)`);
     }
   } catch (err) {
     logError(`[Scheduler] Background sync error: ${err}`);

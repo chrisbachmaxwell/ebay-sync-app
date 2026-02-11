@@ -113,15 +113,151 @@ router.put('/api/settings', async (req: Request, res: Response) => {
   }
 });
 
+/** POST /api/sync/products — Sync Shopify products to eBay listings */
+router.post('/api/sync/products', async (req: Request, res: Response) => {
+  try {
+    const db = await getRawDb();
+    const dryRun = req.query.dry === 'true';
+    const productIds = req.body.productIds as string[];
+    
+    if (!Array.isArray(productIds) || productIds.length === 0) {
+      res.status(400).json({ error: 'productIds array required in request body' });
+      return;
+    }
+    
+    // Get tokens
+    const ebayRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'ebay'`).get() as any;
+    const shopifyRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`).get() as any;
+    
+    if (!ebayRow?.access_token) {
+      res.status(400).json({ error: 'eBay token not found. Complete OAuth first.' });
+      return;
+    }
+    
+    if (!shopifyRow?.access_token) {
+      res.status(400).json({ error: 'Shopify token not found. Complete OAuth first.' });
+      return;
+    }
+    
+    // Get settings
+    const settings = db.prepare(`SELECT * FROM settings`).all() as any[];
+    const settingsObj = Object.fromEntries(settings.map((s) => [s.key, s.value]));
+    
+    info(`[API] Product sync triggered: ${productIds.length} products${dryRun ? ' (DRY RUN)' : ''}`);
+    res.json({ ok: true, message: 'Product sync triggered', productIds, dryRun });
+    
+    // Run sync in background
+    try {
+      const { syncProducts } = await import('../../sync/product-sync.js');
+      const result = await syncProducts(
+        ebayRow.access_token,
+        shopifyRow.access_token,
+        productIds,
+        settingsObj,
+        { dryRun }
+      );
+      info(`[API] Product sync complete: ${result.created} created, ${result.skipped} skipped, ${result.failed} failed`);
+    } catch (err) {
+      info(`[API] Product sync error: ${err}`);
+    }
+    
+  } catch (err) {
+    res.status(500).json({ error: 'Product sync failed', detail: String(err) });
+  }
+});
+
+/** POST /api/sync/inventory — Sync inventory levels Shopify → eBay */
+router.post('/api/sync/inventory', async (req: Request, res: Response) => {
+  try {
+    const db = await getRawDb();
+    const dryRun = req.query.dry === 'true';
+    
+    // Get tokens
+    const ebayRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'ebay'`).get() as any;
+    const shopifyRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`).get() as any;
+    
+    if (!ebayRow?.access_token) {
+      res.status(400).json({ error: 'eBay token not found. Complete OAuth first.' });
+      return;
+    }
+    
+    if (!shopifyRow?.access_token) {
+      res.status(400).json({ error: 'Shopify token not found. Complete OAuth first.' });
+      return;
+    }
+    
+    info(`[API] Inventory sync triggered${dryRun ? ' (DRY RUN)' : ''}`);
+    res.json({ ok: true, message: 'Inventory sync triggered', dryRun });
+    
+    // Run sync in background
+    try {
+      const { syncAllInventory } = await import('../../sync/inventory-sync.js');
+      const result = await syncAllInventory(
+        ebayRow.access_token,
+        shopifyRow.access_token,
+        { dryRun }
+      );
+      info(`[API] Inventory sync complete: ${result.updated} updated, ${result.skipped} skipped, ${result.failed} failed`);
+    } catch (err) {
+      info(`[API] Inventory sync error: ${err}`);
+    }
+    
+  } catch (err) {
+    res.status(500).json({ error: 'Inventory sync failed', detail: String(err) });
+  }
+});
+
+/** POST /api/listings/link — Manually link eBay listing to Shopify product */
+router.post('/api/listings/link', async (req: Request, res: Response) => {
+  try {
+    const { shopifyProductId, ebayListingId, sku } = req.body;
+    
+    if (!shopifyProductId || !ebayListingId || !sku) {
+      res.status(400).json({ error: 'shopifyProductId, ebayListingId, and sku are required' });
+      return;
+    }
+    
+    const db = await getRawDb();
+    
+    // Check if already linked
+    const existing = db.prepare(
+      `SELECT * FROM product_mappings WHERE shopify_product_id = ? OR ebay_listing_id = ?`
+    ).get(shopifyProductId, ebayListingId) as any;
+    
+    if (existing) {
+      res.status(400).json({ error: 'Product or listing already linked' });
+      return;
+    }
+    
+    // Create mapping
+    db.prepare(
+      `INSERT INTO product_mappings (shopify_product_id, ebay_listing_id, ebay_inventory_item_id, status, created_at, updated_at)
+       VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`
+    ).run(shopifyProductId, ebayListingId, sku);
+    
+    info(`[API] Manually linked: Shopify ${shopifyProductId} ↔ eBay ${ebayListingId} (SKU: ${sku})`);
+    res.json({ ok: true, message: 'Listing linked successfully' });
+    
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to link listing', detail: String(err) });
+  }
+});
+
 /** POST /api/sync/trigger — Manually trigger a full sync */
-router.post('/api/sync/trigger', async (_req: Request, res: Response) => {
-  info('[API] Manual sync triggered');
-  res.json({ ok: true, message: 'Sync triggered' });
+router.post('/api/sync/trigger', async (req: Request, res: Response) => {
+  const since = req.query.since as string;
+  const dryRun = req.query.dry === 'true';
+  
+  info(`[API] Manual sync triggered${since ? ` (since: ${since})` : ''}${dryRun ? ' (DRY RUN)' : ''}`);
+  res.json({ ok: true, message: 'Sync triggered', since, dryRun });
 
   try {
     const { runOrderSync } = await import('../sync-helper.js');
-    const result = await runOrderSync({ dryRun: false });
-    info(`[API] Manual sync complete: ${result?.imported ?? 0} orders imported`);
+    const result = await runOrderSync({ 
+      dryRun, 
+      since: since || undefined  // Use since param or fall back to default 24h
+    });
+    info(`[API] Manual sync complete: ${result?.imported ?? 0} orders imported, ${result?.skipped ?? 0} skipped, ${result?.failed ?? 0} failed`);
   } catch (err) {
     info(`[API] Manual sync error: ${err}`);
   }

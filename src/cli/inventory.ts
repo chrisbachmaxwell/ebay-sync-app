@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import ora from 'ora';
-import { syncInventory } from '../sync/inventory-sync.js';
+import { syncAllInventory } from '../sync/inventory-sync.js';
 import { getDb } from '../db/client.js';
 import { authTokens } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
@@ -31,7 +31,7 @@ export const buildInventoryCommand = () => {
         const ebayToken = await getToken('ebay');
         const shopifyToken = await getToken('shopify');
 
-        const result = await syncInventory(ebayToken, shopifyToken, {
+        const result = await syncAllInventory(ebayToken, shopifyToken, {
           dryRun: opts.dryRun,
         });
 
@@ -45,7 +45,7 @@ export const buildInventoryCommand = () => {
 
         if (result.errors.length) {
           logError('Errors:');
-          result.errors.forEach((e) =>
+          result.errors.forEach((e: { sku: string; error: string }) =>
             logError(`  ${e.sku}: ${e.error}`),
           );
         }

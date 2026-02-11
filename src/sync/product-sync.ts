@@ -1,217 +1,350 @@
+import { fetchDetailedShopifyProduct, fetchAllShopifyProducts } from '../shopify/products.js';
 import {
   createOrReplaceInventoryItem,
   createOffer,
   publishOffer,
-  getOffers,
+  getInventoryItem,
+  type EbayInventoryItem,
   type EbayOffer,
 } from '../ebay/inventory.js';
 import { getDb } from '../db/client.js';
 import { productMappings, syncLog } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { info, warn, error as logError } from '../utils/logger.js';
-import { loadShopifyCredentials } from '../config/credentials.js';
-
-export interface ShopifyProduct {
-  id: string;
-  title: string;
-  bodyHtml: string;
-  vendor: string;
-  productType: string;
-  tags: string[];
-  images: Array<{ src: string }>;
-  variants: Array<{
-    id: string;
-    sku: string;
-    price: string;
-    inventoryQuantity: number;
-    weight?: number;
-    weightUnit?: string;
-  }>;
-}
+import { mapCondition, mapCategory, cleanTitle, parsePrice } from './mapper.js';
 
 export interface ProductSyncResult {
+  processed: number;
   created: number;
   updated: number;
   skipped: number;
   failed: number;
-  errors: Array<{ sku: string; error: string }>;
+  errors: Array<{ productId: string; error: string }>;
 }
 
 /**
- * Map a Shopify product to eBay inventory item format.
+ * Default eBay business policies for Used Camera Gear.
+ * These should be configurable via settings in a real implementation.
  */
-const mapShopifyToEbayItem = (product: ShopifyProduct, variant: ShopifyProduct['variants'][0]) => {
-  // Strip HTML from description
-  const description = product.bodyHtml
-    ? product.bodyHtml.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-    : product.title;
-
-  return {
-    product: {
-      title: product.title.slice(0, 80), // eBay title max 80 chars
-      description,
-      imageUrls: product.images.map((img) => img.src).slice(0, 12), // eBay max 12 images
-      aspects: {
-        Brand: [product.vendor || 'Unbranded'],
-        Type: [product.productType || 'Camera Equipment'],
-      },
-    },
-    condition: 'USED_GOOD' as string, // Default for used camera gear
-    conditionDescription: 'Pre-owned, tested and working. See description for details.',
-    availability: {
-      shipToLocationAvailability: {
-        quantity: Math.max(0, variant.inventoryQuantity),
-      },
-    },
-  };
+const DEFAULT_POLICIES = {
+  fulfillmentPolicyId: '8031490000', // You need to get actual policy IDs from eBay
+  paymentPolicyId: '8031491000',
+  returnPolicyId: '8031492000',
 };
 
 /**
- * Sync products from Shopify to eBay.
- * Creates inventory items and offers for products that don't exist on eBay yet.
+ * Default item location from settings.
+ */
+const DEFAULT_LOCATION = '305 W 700 S, Salt Lake City, UT 84101';
+
+/**
+ * Map a Shopify product to eBay inventory item and offer.
+ */
+const mapShopifyProductToEbay = (
+  shopifyProduct: any,
+  variant: any,
+  settings: Record<string, string>,
+): { inventoryItem: Omit<EbayInventoryItem, 'sku'>; offer: Omit<EbayOffer, 'offerId' | 'sku'> } => {
+  
+  const condition = mapCondition(shopifyProduct.tags);
+  const categoryId = mapCategory(shopifyProduct.productType);
+  const price = parsePrice(variant.price);
+  const quantity = Math.max(0, variant.inventoryQuantity || 0);
+  
+  // Clean up description
+  let description = shopifyProduct.description || shopifyProduct.title;
+  if (description.length > 2000) {
+    description = description.slice(0, 1997) + '...';
+  }
+  
+  // Build image URLs (eBay wants HTTPS)
+  const imageUrls = shopifyProduct.images
+    .slice(0, 12)  // eBay max 12 images
+    .map((img: any) => img.url.replace(/^http:/, 'https:'));
+
+  const inventoryItem: Omit<EbayInventoryItem, 'sku'> = {
+    product: {
+      title: cleanTitle(shopifyProduct.title),
+      description,
+      imageUrls,
+      brand: shopifyProduct.vendor || undefined,
+    },
+    condition,
+    conditionDescription: condition === 'GOOD' ? 'Used but in good working condition' : undefined,
+    availability: {
+      shipToLocationAvailability: {
+        quantity,
+      },
+    },
+    packageWeightAndSize: variant.weight ? {
+      weight: {
+        value: variant.weight,
+        unit: variant.weightUnit === 'lb' ? 'POUND' : 'KILOGRAM',
+      },
+    } : undefined,
+  };
+
+  const offer: Omit<EbayOffer, 'offerId' | 'sku'> = {
+    marketplaceId: 'EBAY_US',
+    format: 'FIXED_PRICE',
+    availableQuantity: quantity,
+    pricingSummary: {
+      price: {
+        value: price.toFixed(2),
+        currency: 'USD',
+      },
+    },
+    listingPolicies: {
+      fulfillmentPolicyId: DEFAULT_POLICIES.fulfillmentPolicyId,
+      paymentPolicyId: DEFAULT_POLICIES.paymentPolicyId,
+      returnPolicyId: DEFAULT_POLICIES.returnPolicyId,
+    },
+    categoryId,
+    tax: {
+      applyTax: true,
+    },
+  };
+
+  return { inventoryItem, offer };
+};
+
+/**
+ * Sync a single Shopify product to eBay.
+ * Creates inventory item and offer, publishes the listing.
+ */
+const syncProductToEbay = async (
+  ebayToken: string,
+  shopifyToken: string,
+  productId: string,
+  settings: Record<string, string>,
+  options: { dryRun?: boolean } = {},
+): Promise<{ success: boolean; error?: string; listingId?: string }> => {
+  
+  try {
+    const db = await getDb();
+    
+    // Check if already mapped
+    const existing = await db
+      .select()
+      .from(productMappings)
+      .where(eq(productMappings.shopifyProductId, productId))
+      .get();
+    
+    if (existing) {
+      return { success: false, error: 'Already mapped to eBay' };
+    }
+    
+    // Get detailed product info
+    const product = await fetchDetailedShopifyProduct(shopifyToken, productId);
+    if (!product) {
+      return { success: false, error: 'Product not found' };
+    }
+    
+    if (product.status !== 'active') {
+      return { success: false, error: 'Product not active' };
+    }
+    
+    // For now, only handle single variant products
+    // Multi-variant support would need more complex eBay variation handling
+    if (product.variants.length > 1) {
+      return { success: false, error: 'Multi-variant products not supported yet' };
+    }
+    
+    const variant = product.variants[0];
+    if (!variant.sku) {
+      return { success: false, error: 'Product variant missing SKU' };
+    }
+    
+    if (variant.inventoryQuantity <= 0) {
+      return { success: false, error: 'No inventory available' };
+    }
+    
+    if (options.dryRun) {
+      info(`[DRY RUN] Would create eBay listing: ${product.title} (SKU: ${variant.sku})`);
+      return { success: true };
+    }
+    
+    // Check if inventory item already exists on eBay
+    const existingItem = await getInventoryItem(ebayToken, variant.sku);
+    
+    // Map to eBay format
+    const { inventoryItem, offer } = mapShopifyProductToEbay(product, variant, settings);
+    
+    // Create/update inventory item
+    await createOrReplaceInventoryItem(ebayToken, variant.sku, inventoryItem);
+    info(`Created eBay inventory item: ${variant.sku}`);
+    
+    // Create offer
+    const offerResponse = await createOffer(ebayToken, {
+      ...offer,
+      sku: variant.sku,
+    });
+    info(`Created eBay offer: ${offerResponse.offerId}`);
+    
+    // Publish the listing
+    const publishResponse = await publishOffer(ebayToken, offerResponse.offerId);
+    const listingId = publishResponse.listingId;
+    info(`Published eBay listing: ${listingId}`);
+    
+    // Save mapping
+    await db
+      .insert(productMappings)
+      .values({
+        shopifyProductId: productId,
+        ebayListingId: listingId,
+        ebayInventoryItemId: variant.sku,
+        status: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .run();
+    
+    // Log sync
+    await db
+      .insert(syncLog)
+      .values({
+        direction: 'shopify_to_ebay',
+        entityType: 'product',
+        entityId: productId,
+        status: 'success',
+        detail: `Created eBay listing ${listingId} for SKU ${variant.sku}`,
+        createdAt: new Date(),
+      })
+      .run();
+    
+    return { success: true, listingId };
+    
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    logError(`Failed to sync product ${productId}: ${errorMsg}`);
+    
+    // Log failure
+    const db = await getDb();
+    await db
+      .insert(syncLog)
+      .values({
+        direction: 'shopify_to_ebay',
+        entityType: 'product',
+        entityId: productId,
+        status: 'failed',
+        detail: errorMsg,
+        createdAt: new Date(),
+      })
+      .run();
+    
+    return { success: false, error: errorMsg };
+  }
+};
+
+/**
+ * Sync multiple Shopify products to eBay.
  */
 export const syncProducts = async (
-  ebayAccessToken: string,
-  shopifyAccessToken: string,
-  products: ShopifyProduct[],
-  options: {
-    dryRun?: boolean;
-    categoryId?: string; // Default eBay category
-    fulfillmentPolicyId?: string;
-    paymentPolicyId?: string;
-    returnPolicyId?: string;
-  } = {},
+  ebayToken: string,
+  shopifyToken: string,
+  productIds: string[],
+  settings: Record<string, string> = {},
+  options: { dryRun?: boolean } = {},
 ): Promise<ProductSyncResult> => {
+  
   const result: ProductSyncResult = {
+    processed: 0,
     created: 0,
     updated: 0,
     skipped: 0,
     failed: 0,
     errors: [],
   };
-
-  const db = await getDb();
-
-  for (const product of products) {
-    for (const variant of product.variants) {
-      const sku = variant.sku;
-      if (!sku) {
-        warn(`Skipping product "${product.title}" — no SKU`);
+  
+  info(`Starting product sync for ${productIds.length} products...`);
+  
+  for (const productId of productIds) {
+    result.processed++;
+    
+    const syncResult = await syncProductToEbay(
+      ebayToken,
+      shopifyToken,
+      productId,
+      settings,
+      options,
+    );
+    
+    if (syncResult.success) {
+      result.created++;
+      info(`✅ ${productId} → eBay listing ${syncResult.listingId || 'N/A'}`);
+    } else {
+      if (syncResult.error?.includes('Already mapped')) {
         result.skipped++;
-        continue;
-      }
-
-      try {
-        // Check if already synced
-        const existing = await db
-          .select()
-          .from(productMappings)
-          .where(eq(productMappings.shopifyProductId, String(product.id)))
-          .get();
-
-        if (existing) {
-          result.skipped++;
-          continue;
-        }
-
-        if (options.dryRun) {
-          info(`[DRY RUN] Would create: ${sku} — ${product.title} ($${variant.price})`);
-          result.created++;
-          continue;
-        }
-
-        // Create inventory item
-        const ebayItem = mapShopifyToEbayItem(product, variant);
-        await createOrReplaceInventoryItem(ebayAccessToken, sku, ebayItem);
-
-        // Check for existing offer
-        let offerId: string | undefined;
-        try {
-          const offers = await getOffers(ebayAccessToken, sku);
-          if (offers.offers?.length > 0) {
-            offerId = offers.offers[0].offerId;
-          }
-        } catch {
-          // No existing offers
-        }
-
-        // Create offer if none exists
-        if (!offerId && options.categoryId) {
-          const offer: Omit<EbayOffer, 'offerId'> = {
-            sku,
-            marketplaceId: 'EBAY_US',
-            format: 'FIXED_PRICE',
-            availableQuantity: Math.max(0, variant.inventoryQuantity),
-            pricingSummary: {
-              price: { value: variant.price, currency: 'USD' },
-            },
-            listingPolicies: {
-              fulfillmentPolicyId: options.fulfillmentPolicyId || '',
-              paymentPolicyId: options.paymentPolicyId || '',
-              returnPolicyId: options.returnPolicyId || '',
-            },
-            categoryId: options.categoryId,
-          };
-
-          const offerResult = await createOffer(ebayAccessToken, offer);
-          offerId = offerResult.offerId;
-
-          // Publish the offer to make it live
-          if (offerId) {
-            const published = await publishOffer(ebayAccessToken, offerId);
-            info(`Published: ${sku} → eBay listing ${published.listingId}`);
-
-            // Save mapping
-            await db
-              .insert(productMappings)
-              .values({
-                shopifyProductId: String(product.id),
-                ebayListingId: published.listingId,
-                ebayInventoryItemId: sku,
-                status: 'active',
-                createdAt: new Date(),
-                updatedAt: new Date(),
-              })
-              .run();
-          }
-        } else if (!options.categoryId) {
-          // Save mapping without listing (inventory item only)
-          await db
-            .insert(productMappings)
-            .values({
-              shopifyProductId: String(product.id),
-              ebayListingId: offerId || 'pending',
-              ebayInventoryItemId: sku,
-              status: offerId ? 'active' : 'inventory_only',
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .run();
-        }
-
-        // Log sync
-        await db
-          .insert(syncLog)
-          .values({
-            direction: 'shopify_to_ebay',
-            entityType: 'product',
-            entityId: sku,
-            status: 'success',
-            detail: `Created eBay inventory item for ${product.title}`,
-            createdAt: new Date(),
-          })
-          .run();
-
-        info(`Synced: ${sku} — ${product.title}`);
-        result.created++;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logError(`Failed to sync ${sku}: ${msg}`);
+      } else {
         result.failed++;
-        result.errors.push({ sku, error: msg });
+        result.errors.push({ productId, error: syncResult.error || 'Unknown error' });
       }
+      info(`❌ ${productId}: ${syncResult.error}`);
+    }
+    
+    // Rate limiting: eBay allows 5 requests/sec
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  
+  info(`Product sync complete: ${result.created} created, ${result.skipped} skipped, ${result.failed} failed`);
+  return result;
+};
+
+/**
+ * Auto-sync new Shopify products to eBay based on settings.
+ */
+export const autoSyncNewProducts = async (
+  ebayToken: string,
+  shopifyToken: string,
+  settings: Record<string, string> = {},
+): Promise<ProductSyncResult> => {
+  
+  if (settings.auto_list !== 'true') {
+    info('[AutoSync] Auto-list disabled');
+    return {
+      processed: 0,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      errors: [],
+    };
+  }
+  
+  const db = await getDb();
+  
+  // Get all active Shopify products
+  const products = await fetchAllShopifyProducts(shopifyToken, { 
+    status: 'active',
+    limit: 50,  // Start small for testing
+  });
+  
+  // Filter out already mapped products
+  const unmappedProducts = [];
+  for (const product of products) {
+    const existing = await db
+      .select()
+      .from(productMappings)
+      .where(eq(productMappings.shopifyProductId, product.id))
+      .get();
+    
+    if (!existing) {
+      unmappedProducts.push(product.id);
     }
   }
-
-  return result;
+  
+  if (unmappedProducts.length === 0) {
+    info('[AutoSync] No new products to sync');
+    return {
+      processed: 0,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      errors: [],
+    };
+  }
+  
+  info(`[AutoSync] Found ${unmappedProducts.length} new products to sync`);
+  return syncProducts(ebayToken, shopifyToken, unmappedProducts, settings);
 };

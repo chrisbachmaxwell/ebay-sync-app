@@ -79,26 +79,74 @@ export const createShopifyOrder = async (
 
 /**
  * Check if an eBay order was already imported into Shopify.
- * Searches by tag (eBay-{orderId}).
+ * Uses multiple search methods to prevent duplicates:
+ * 1. Tag-based search (eBay-{orderId}) - for orders created by this app
+ * 2. source_identifier search - for standards compliance
+ * 3. Note content search - for orders created by legacy apps like Codisto
  */
 export const findExistingShopifyOrder = async (
   accessToken: string,
   ebayOrderId: string,
 ): Promise<{ id: number; name: string } | null> => {
   const creds = await loadShopifyCredentials();
-  const tag = `eBay-${ebayOrderId}`;
-  const url = `https://${creds.storeDomain}/admin/api/2024-01/orders.json?status=any&tag=${encodeURIComponent(tag)}&limit=1`;
-
-  const response = await fetch(url, {
+  
+  // Method 1: Search by our tag (eBay-{orderId})
+  const tagUrl = `https://${creds.storeDomain}/admin/api/2024-01/orders.json?status=any&tag=${encodeURIComponent(`eBay-${ebayOrderId}`)}&limit=1`;
+  const tagResponse = await fetch(tagUrl, {
     headers: { 'X-Shopify-Access-Token': accessToken },
   });
-
-  if (!response.ok) return null;
-
-  const data = (await response.json()) as {
-    orders: Array<{ id: number; name: string }>;
-  };
-  return data.orders[0] ?? null;
+  
+  if (tagResponse.ok) {
+    const tagData = (await tagResponse.json()) as {
+      orders: Array<{ id: number; name: string }>;
+    };
+    if (tagData.orders[0]) {
+      return tagData.orders[0];
+    }
+  }
+  
+  // Method 2: Search by source_identifier matching eBay order ID
+  // Rate limit: wait 500ms between requests
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  const sourceUrl = `https://${creds.storeDomain}/admin/api/2024-01/orders.json?status=any&source_identifier=${encodeURIComponent(ebayOrderId)}&limit=1`;
+  const sourceResponse = await fetch(sourceUrl, {
+    headers: { 'X-Shopify-Access-Token': accessToken },
+  });
+  
+  if (sourceResponse.ok) {
+    const sourceData = (await sourceResponse.json()) as {
+      orders: Array<{ id: number; name: string }>;
+    };
+    if (sourceData.orders[0]) {
+      return sourceData.orders[0];
+    }
+  }
+  
+  // Method 3: Search recent orders and check note field for eBay order ID
+  // This catches orders created by Codisto or other legacy apps
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  const recentUrl = `https://${creds.storeDomain}/admin/api/2024-01/orders.json?status=any&limit=250&created_at_min=${new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()}`;
+  const recentResponse = await fetch(recentUrl, {
+    headers: { 'X-Shopify-Access-Token': accessToken },
+  });
+  
+  if (recentResponse.ok) {
+    const recentData = (await recentResponse.json()) as {
+      orders: Array<{ id: number; name: string; note?: string; source_name?: string }>;
+    };
+    
+    for (const order of recentData.orders) {
+      // Check if this is an eBay order and contains our order ID
+      if (order.source_name === 'ebay' || 
+          (order.note && order.note.includes(ebayOrderId))) {
+        return { id: order.id, name: order.name };
+      }
+    }
+  }
+  
+  return null;
 };
 
 /**
