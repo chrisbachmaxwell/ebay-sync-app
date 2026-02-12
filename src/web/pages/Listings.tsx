@@ -22,7 +22,7 @@ import {
 import { ExternalLink, RefreshCw, RotateCw, Search, XCircle } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import { apiClient, useListings, useMappings, useSyncProducts } from '../hooks/useApi';
+import { apiClient, useListings, useMappings, useProductOverrides, useSaveProductOverrides, useSyncProducts } from '../hooks/useApi';
 import { useAppStore } from '../store';
 
 interface ListingRecord {
@@ -134,6 +134,77 @@ const ListingDetail: React.FC = () => {
   });
 
   const { data: mappings } = useMappings();
+  const { data: overridesResponse } = useProductOverrides(id);
+  const saveOverrides = useSaveProductOverrides();
+
+  // Track editable override values
+  const [overrideValues, setOverrideValues] = useState<Record<string, string>>({});
+  const [overridesDirty, setOverridesDirty] = useState(false);
+  const [overrideSaved, setOverrideSaved] = useState(false);
+
+  // Initialize override values from API response
+  useEffect(() => {
+    if (overridesResponse?.data) {
+      const vals: Record<string, string> = {};
+      for (const o of overridesResponse.data) {
+        vals[`${o.category}::${o.field_name}`] = o.value ?? '';
+      }
+      setOverrideValues(vals);
+      setOverridesDirty(false);
+    }
+  }, [overridesResponse]);
+
+  // Get all edit_in_grid mappings grouped by category
+  const editableFields = useMemo(() => {
+    if (!mappings) return {} as Record<string, Array<{ field_name: string; display_order: number }>>;
+    const grouped: Record<string, Array<{ field_name: string; display_order: number }>> = {};
+    const categories = ['sales', 'listing', 'shipping', 'payment'] as const;
+    const m = mappings as unknown as Record<string, any[]>;
+    for (const cat of categories) {
+      const fields = (m[cat] ?? [])
+        .filter((m: any) => m.mapping_type === 'edit_in_grid' && m.is_enabled !== false)
+        .map((m: any) => ({ field_name: m.field_name, display_order: m.display_order }))
+        .sort((a: any, b: any) => a.display_order - b.display_order);
+      if (fields.length > 0) grouped[cat] = fields;
+    }
+    return grouped;
+  }, [mappings]);
+
+  const handleOverrideChange = useCallback((category: string, fieldName: string, value: string) => {
+    const key = `${category}::${fieldName}`;
+    setOverrideValues((prev) => ({ ...prev, [key]: value }));
+    setOverridesDirty(true);
+    setOverrideSaved(false);
+  }, []);
+
+  const handleSaveOverrides = useCallback(() => {
+    if (!id) return;
+    const overrides: Array<{ category: string; field_name: string; value: string }> = [];
+    for (const [key, value] of Object.entries(overrideValues)) {
+      if (value.trim() === '') continue;
+      const [category, field_name] = key.split('::');
+      overrides.push({ category, field_name, value });
+    }
+    saveOverrides.mutate(
+      { shopifyProductId: id, overrides },
+      {
+        onSuccess: () => {
+          setOverridesDirty(false);
+          setOverrideSaved(true);
+        },
+      },
+    );
+  }, [id, overrideValues, saveOverrides]);
+
+  const categoryLabels: Record<string, string> = {
+    sales: 'Sales',
+    listing: 'Listing',
+    shipping: 'Shipping',
+    payment: 'Payment',
+  };
+
+  const formatFieldLabel = (fieldName: string) =>
+    fieldName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
   const syncMutation = useMutation({
     mutationFn: () => apiClient.put(`/sync/products/${id}`),
@@ -317,6 +388,49 @@ const ListingDetail: React.FC = () => {
               </BlockStack>
             </Card>
           </Layout.Section>
+
+          {Object.keys(editableFields).length > 0 && (
+            <Layout.Section>
+              <Card>
+                <BlockStack gap="400">
+                  <InlineStack align="space-between">
+                    <Text variant="headingMd" as="h2">Per-product overrides</Text>
+                    <Button
+                      variant="primary"
+                      onClick={handleSaveOverrides}
+                      loading={saveOverrides.isPending}
+                      disabled={!overridesDirty}
+                    >
+                      Save overrides
+                    </Button>
+                  </InlineStack>
+                  {overrideSaved && (
+                    <Banner tone="success" title="Overrides saved successfully" onDismiss={() => setOverrideSaved(false)} />
+                  )}
+                  <Text variant="bodySm" tone="subdued" as="p">
+                    Edit field values for this specific product. These override the default mapping settings.
+                  </Text>
+                  {Object.entries(editableFields).map(([category, fields]) => (
+                    <BlockStack key={category} gap="300">
+                      <Text variant="headingSm" as="h3">{categoryLabels[category] ?? category}</Text>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '12px' }}>
+                        {fields.map((field) => (
+                          <TextField
+                            key={`${category}::${field.field_name}`}
+                            label={formatFieldLabel(field.field_name)}
+                            value={overrideValues[`${category}::${field.field_name}`] ?? ''}
+                            onChange={(value) => handleOverrideChange(category, field.field_name, value)}
+                            autoComplete="off"
+                          />
+                        ))}
+                      </div>
+                      <Divider />
+                    </BlockStack>
+                  ))}
+                </BlockStack>
+              </Card>
+            </Layout.Section>
+          )}
 
           <Layout.Section>
             <Card>

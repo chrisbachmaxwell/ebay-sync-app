@@ -346,3 +346,70 @@ export const getEbayHandlingTime = async (shopifyProduct: any): Promise<number> 
   
   return 1; // Default to 1 business day
 };
+
+// ── Per-product overrides for edit_in_grid mappings ──
+
+export interface ProductMappingOverride {
+  id: number;
+  shopify_product_id: string;
+  category: string;
+  field_name: string;
+  value: string | null;
+  updated_at: string;
+}
+
+export const getProductOverrides = async (
+  shopifyProductId: string,
+): Promise<ProductMappingOverride[]> => {
+  const db = await getRawDb();
+  return db
+    .prepare('SELECT * FROM product_mapping_overrides WHERE shopify_product_id = ?')
+    .all(shopifyProductId) as ProductMappingOverride[];
+};
+
+export const saveProductOverride = async (
+  shopifyProductId: string,
+  category: string,
+  fieldName: string,
+  value: string,
+): Promise<void> => {
+  const db = await getRawDb();
+  db.prepare(
+    `INSERT INTO product_mapping_overrides (shopify_product_id, category, field_name, value, updated_at)
+     VALUES (?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(shopify_product_id, category, field_name)
+     DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+  ).run(shopifyProductId, category, fieldName, value);
+  info(`[Overrides] Saved ${category}.${fieldName} = "${value}" for product ${shopifyProductId}`);
+};
+
+export const deleteProductOverride = async (
+  shopifyProductId: string,
+  category: string,
+  fieldName: string,
+): Promise<void> => {
+  const db = await getRawDb();
+  db.prepare(
+    'DELETE FROM product_mapping_overrides WHERE shopify_product_id = ? AND category = ? AND field_name = ?',
+  ).run(shopifyProductId, category, fieldName);
+};
+
+export const saveProductOverridesBulk = async (
+  shopifyProductId: string,
+  overrides: Array<{ category: string; field_name: string; value: string }>,
+): Promise<number> => {
+  const db = await getRawDb();
+  const stmt = db.prepare(
+    `INSERT INTO product_mapping_overrides (shopify_product_id, category, field_name, value, updated_at)
+     VALUES (?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(shopify_product_id, category, field_name)
+     DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+  );
+  let count = 0;
+  for (const o of overrides) {
+    stmt.run(shopifyProductId, o.category, o.field_name, o.value);
+    count++;
+  }
+  info(`[Overrides] Saved ${count} overrides for product ${shopifyProductId}`);
+  return count;
+};

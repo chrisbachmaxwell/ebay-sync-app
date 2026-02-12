@@ -91,6 +91,15 @@ const initExtraTables = (sqlite: InstanceType<typeof Database>) => {
       message TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS product_mapping_overrides (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shopify_product_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      field_name TEXT NOT NULL,
+      value TEXT,
+      updated_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(shopify_product_id, category, field_name)
+    );
   `);
 };
 

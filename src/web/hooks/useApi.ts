@@ -297,6 +297,46 @@ export const useBulkUpdateMappings = () => {
   });
 };
 
+// ── Per-product overrides (edit_in_grid) ──
+
+export const useProductOverrides = (shopifyProductId: string | undefined) => {
+  return useQuery({
+    queryKey: ['product-overrides', shopifyProductId],
+    queryFn: () =>
+      apiClient.get<{ data: Array<{ category: string; field_name: string; value: string | null }> }>(
+        `/product-overrides/${shopifyProductId}`,
+      ),
+    enabled: Boolean(shopifyProductId),
+  });
+};
+
+export const useSaveProductOverrides = () => {
+  const queryClient = useQueryClient();
+  const { addNotification } = useAppStore();
+
+  return useMutation({
+    mutationFn: ({
+      shopifyProductId,
+      overrides,
+    }: {
+      shopifyProductId: string;
+      overrides: Array<{ category: string; field_name: string; value: string }>;
+    }) => apiClient.put(`/product-overrides/${shopifyProductId}`, { overrides }),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['product-overrides', variables.shopifyProductId] });
+      addNotification({ type: 'success', title: 'Overrides saved', autoClose: 4000 });
+    },
+    onError: (error) => {
+      addNotification({
+        type: 'error',
+        title: 'Failed to save overrides',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        autoClose: 8000,
+      });
+    },
+  });
+};
+
 export const useSyncProducts = () => {
   const queryClient = useQueryClient();
   const { addNotification, addSyncOperation, removeSyncOperation } = useAppStore();

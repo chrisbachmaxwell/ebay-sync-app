@@ -731,6 +731,37 @@ router.post('/api/mappings/import', async (req: Request, res: Response) => {
   }
 });
 
+/** GET /api/product-overrides/:shopifyProductId — Get per-product overrides */
+router.get('/api/product-overrides/:shopifyProductId', async (req: Request, res: Response) => {
+  try {
+    const { shopifyProductId } = req.params;
+    const { getProductOverrides } = await import('../../sync/attribute-mapping-service.js');
+    const overrides = await getProductOverrides(shopifyProductId as string);
+    res.json({ data: overrides });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch product overrides', detail: String(err) });
+  }
+});
+
+/** PUT /api/product-overrides/:shopifyProductId — Save per-product overrides */
+router.put('/api/product-overrides/:shopifyProductId', async (req: Request, res: Response) => {
+  try {
+    const { shopifyProductId } = req.params;
+    const { overrides } = req.body;
+
+    if (!Array.isArray(overrides)) {
+      res.status(400).json({ error: 'overrides array is required' });
+      return;
+    }
+
+    const { saveProductOverridesBulk } = await import('../../sync/attribute-mapping-service.js');
+    const count = await saveProductOverridesBulk(shopifyProductId as string, overrides);
+    res.json({ ok: true, saved: count });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save product overrides', detail: String(err) });
+  }
+});
+
 /** POST /api/sync/trigger — Manually trigger a full sync */
 router.post('/api/sync/trigger', async (req: Request, res: Response) => {
   const since = req.query.since as string;
