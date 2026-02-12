@@ -24,6 +24,7 @@ import {
   ExportIcon,
   ConnectIcon
 } from '@shopify/polaris-icons';
+
 // Mock hook for now
 const useApi = <T,>(url: string) => {
   const [data, setData] = useState<T | null>(null);
@@ -100,9 +101,7 @@ const Mappings: React.FC = () => {
 
   const tabs = categories.map((category, index) => ({
     id: `category-${index}`,
-    content: (
-      category.category
-    ),
+    content: category.category,
     accessibilityLabel: `${category.category} mappings`,
   }));
 
@@ -180,7 +179,7 @@ const Mappings: React.FC = () => {
     }
   };
 
-  const renderMappingRow = (field: MappingField, index: number) => {
+  const renderMappingRow = (field: MappingField) => {
     const fieldKey = `${currentCategory?.category}-${field.shopify_field}`;
     const isEditing = editingField === fieldKey;
 
@@ -199,7 +198,6 @@ const Mappings: React.FC = () => {
             value={editValue}
             onChange={setEditValue}
             autoComplete="off"
-            size="slim"
           />
           <ButtonGroup>
             <Tooltip content="Save">
@@ -222,7 +220,7 @@ const Mappings: React.FC = () => {
         </div>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Text as="span">{field.ebay_field || <Text tone="subdued">Not mapped</Text>}</Text>
+          <Text as="span">{field.ebay_field || <Text as="span" tone="subdued">Not mapped</Text>}</Text>
           <Tooltip content="Edit mapping">
             <Button
               icon={EditIcon}
@@ -233,7 +231,7 @@ const Mappings: React.FC = () => {
           </Tooltip>
         </div>
       ),
-      <Badge tone={field.field_type === 'text' ? 'info' : field.field_type === 'number' ? 'attention' : 'success'}>
+      <Badge tone={field.field_type === 'text' ? 'info' : field.field_type === 'number' ? 'warning' : 'success'}>
         {field.field_type}
       </Badge>,
       <Text as="span" tone="subdued" variant="bodyXs">
@@ -300,15 +298,15 @@ const Mappings: React.FC = () => {
       <Card>
         <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab}>
           <div style={{ padding: '16px 0' }}>
-            <Stack distribution="equalSpacing" alignment="center">
-              <Stack spacing="tight">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
                 <Text as="h3" variant="headingMd">
                   {currentCategory?.category} Category
                 </Text>
-                <Text tone="subdued">
+                <Text as="p" tone="subdued">
                   {currentCategory?.fields.length} fields configured
                 </Text>
-              </Stack>
+              </div>
               <ButtonGroup>
                 <Button
                   icon={ImportIcon}
@@ -323,7 +321,7 @@ const Mappings: React.FC = () => {
                   Export
                 </Button>
               </ButtonGroup>
-            </Stack>
+            </div>
           </div>
 
           {currentCategory && (
@@ -374,7 +372,7 @@ const Mappings: React.FC = () => {
         }]}
       >
         <Modal.Section>
-          <Stack vertical>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <Text as="p">
               Select a mapping export file to import. This will overwrite existing mappings.
             </Text>
@@ -386,11 +384,11 @@ const Mappings: React.FC = () => {
               />
             </div>
             {importFile && (
-              <Text tone="subdued">
+              <Text as="p" tone="subdued">
                 Selected: {importFile.name}
               </Text>
             )}
-          </Stack>
+          </div>
         </Modal.Section>
       </Modal>
     </Page>

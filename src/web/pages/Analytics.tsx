@@ -11,16 +11,10 @@ import {
   Text,
   Banner,
   Modal,
-  Collapsible,
-  Icon,
-  Tooltip,
   SkeletonBodyText,
   EmptyState
 } from '@shopify/polaris';
 import {
-  ChevronDownIcon,
-  ChevronUpIcon,
-  CalendarIcon,
   SearchIcon
 } from '@shopify/polaris-icons';
 import {
@@ -36,12 +30,33 @@ import {
   ResponsiveContainer,
   Legend
 } from 'recharts';
-// import { useApi } from '../hooks/useApi';
 
 // Mock hook for now
 const useApi = <T,>(url: string) => {
   return {
-    data: null as T | null,
+    data: {
+      logs: [
+        {
+          id: '1',
+          timestamp: new Date().toISOString(),
+          level: 'info' as const,
+          message: 'Sync completed successfully',
+          source: 'sync-service',
+          details: { products: 10, errors: 0 }
+        }
+      ],
+      total: 1,
+      metrics: [
+        {
+          date: '2024-01-01',
+          total_syncs: 10,
+          successful_syncs: 8,
+          failed_syncs: 2,
+          avg_duration: 30
+        }
+      ],
+      errors: []
+    } as T,
     loading: false,
     error: null
   };
@@ -76,7 +91,6 @@ const Analytics: React.FC = () => {
   const [selectedLevel, setSelectedLevel] = useState<string>('');
   const [selectedDateRange, setSelectedDateRange] = useState('7d');
   const [searchQuery, setSearchQuery] = useState('');
-  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
   const [page, setPage] = useState(1);
@@ -126,15 +140,6 @@ const Analytics: React.FC = () => {
     setDetailModalOpen(true);
   };
 
-  const toggleLogExpansion = (logId: string) => {
-    setExpandedLogId(expandedLogId === logId ? null : logId);
-  };
-
-  const formatDuration = (seconds: number) => {
-    if (seconds < 60) return `${seconds.toFixed(1)}s`;
-    return `${(seconds / 60).toFixed(1)}m`;
-  };
-
   const getBadgeTone = (level: string) => {
     switch (level) {
       case 'error': return 'critical';
@@ -143,28 +148,14 @@ const Analytics: React.FC = () => {
     }
   };
 
-  const renderLogRow = (log: LogEntry, index: number) => {
-    const isExpanded = expandedLogId === log.id;
-    
+  const renderLogRow = (log: LogEntry) => {
     return [
-      <Text variant="bodySm" tone="subdued">
+      <Text as="span" variant="bodySm" tone="subdued">
         {new Date(log.timestamp).toLocaleString()}
       </Text>,
       <Badge tone={getBadgeTone(log.level)}>{log.level.toUpperCase()}</Badge>,
-      <Text variant="bodySm">{log.source}</Text>,
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <Text as="span" variant="bodySm">{log.message}</Text>
-        {log.details && (
-          <Tooltip content={isExpanded ? 'Hide details' : 'Show details'}>
-            <Button
-              variant="plain"
-              size="micro"
-              icon={isExpanded ? ChevronUpIcon : ChevronDownIcon}
-              onClick={() => toggleLogExpansion(log.id)}
-            />
-          </Tooltip>
-        )}
-      </div>,
+      <Text as="span" variant="bodySm">{log.source}</Text>,
+      <Text as="span" variant="bodySm">{log.message}</Text>,
       <Button
         variant="plain"
         size="micro"
@@ -178,14 +169,9 @@ const Analytics: React.FC = () => {
   if (logsLoading) {
     return (
       <Page title="Analytics & Logs">
-        <Stack vertical spacing="loose">
-          <Card>
-            <SkeletonBodyText lines={6} />
-          </Card>
-          <Card>
-            <SkeletonBodyText lines={8} />
-          </Card>
-        </Stack>
+        <Card>
+          <SkeletonBodyText lines={10} />
+        </Card>
       </Page>
     );
   }
@@ -194,7 +180,7 @@ const Analytics: React.FC = () => {
     return (
       <Page title="Analytics & Logs">
         <Banner tone="critical">
-          <p>Failed to load analytics data: {logsError.message}</p>
+          <p>Failed to load analytics data</p>
         </Banner>
       </Page>
     );
@@ -205,128 +191,136 @@ const Analytics: React.FC = () => {
       title="Analytics & Logs"
       subtitle="Monitor sync performance and troubleshoot issues"
     >
-      {/* Performance Charts */}
-      <Stack vertical spacing="loose">
-        <Stack>
-          <Card sectioned title="Sync Volume Over Time" padding="400">
-            {logsData?.metrics?.length ? (
-              <div style={{ width: '100%', height: '300px' }}>
-                <ResponsiveContainer>
-                  <LineChart data={logsData.metrics}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" />
-                    <YAxis />
-                    <RechartsTooltip />
-                    <Legend />
-                    <Line 
-                      type="monotone" 
-                      dataKey="successful_syncs" 
-                      stroke={successColor} 
-                      name="Successful" 
-                      strokeWidth={2}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="failed_syncs" 
-                      stroke={errorColor} 
-                      name="Failed"
-                      strokeWidth={2}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <EmptyState
-                heading="No sync data available"
-                image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
-              >
-                <p>Start syncing products to see performance metrics.</p>
-              </EmptyState>
-            )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {/* Performance Charts */}
+        <div style={{ display: 'flex', gap: '16px' }}>
+          <Card>
+            <div style={{ padding: '16px' }}>
+              <Text as="h2" variant="headingMd">Sync Volume Over Time</Text>
+              {logsData?.metrics?.length ? (
+                <div style={{ width: '100%', height: '300px', marginTop: '16px' }}>
+                  <ResponsiveContainer>
+                    <LineChart data={logsData.metrics}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" />
+                      <YAxis />
+                      <RechartsTooltip />
+                      <Legend />
+                      <Line 
+                        type="monotone" 
+                        dataKey="successful_syncs" 
+                        stroke={successColor} 
+                        name="Successful" 
+                        strokeWidth={2}
+                      />
+                      <Line 
+                        type="monotone" 
+                        dataKey="failed_syncs" 
+                        stroke={errorColor} 
+                        name="Failed"
+                        strokeWidth={2}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <EmptyState
+                  heading="No sync data available"
+                  image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
+                >
+                  <p>Start syncing products to see performance metrics.</p>
+                </EmptyState>
+              )}
+            </div>
           </Card>
 
-          <Card sectioned title="Success vs Failure Ratio" padding="400">
-            {pieData.length ? (
-              <div style={{ width: '100%', height: '300px' }}>
-                <ResponsiveContainer>
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      cx="50%"
-                      cy="50%"
-                      outerRadius={100}
-                      dataKey="value"
-                    >
-                      {pieData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <RechartsTooltip />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <EmptyState
-                heading="No sync data available"
-                image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
-              >
-                <p>Start syncing products to see success metrics.</p>
-              </EmptyState>
-            )}
+          <Card>
+            <div style={{ padding: '16px' }}>
+              <Text as="h2" variant="headingMd">Success vs Failure Ratio</Text>
+              {pieData.length ? (
+                <div style={{ width: '100%', height: '300px', marginTop: '16px' }}>
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie
+                        data={pieData}
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={100}
+                        dataKey="value"
+                      >
+                        {pieData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <EmptyState
+                  heading="No sync data available"
+                  image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
+                >
+                  <p>Start syncing products to see success metrics.</p>
+                </EmptyState>
+              )}
+            </div>
           </Card>
-        </Stack>
+        </div>
 
         {/* Error Aggregation */}
         {logsData?.errors && logsData.errors.length > 0 && (
-          <Card title="Common Errors" sectioned>
-            <DataTable
-              columnContentTypes={['text', 'numeric', 'text', 'text']}
-              headings={['Error Type', 'Count', 'Last Seen', 'Sample Message']}
-              rows={logsData.errors.map((error) => [
-                <Text fontWeight="medium">{error.error_type}</Text>,
-                <Badge tone="critical">{error.count}</Badge>,
-                <Text variant="bodySm" tone="subdued">
-                  {new Date(error.last_occurrence).toRelativeTimeString()}
-                </Text>,
-                <Text variant="bodySm">{error.sample_message}</Text>
-              ])}
-            />
+          <Card>
+            <div style={{ padding: '16px' }}>
+              <Text as="h2" variant="headingMd">Common Errors</Text>
+              <DataTable
+                columnContentTypes={['text', 'numeric', 'text', 'text']}
+                headings={['Error Type', 'Count', 'Last Seen', 'Sample Message']}
+                rows={logsData.errors.map((error) => [
+                  <Text as="span" fontWeight="semibold">{error.error_type}</Text>,
+                  <Badge tone="critical">{String(error.count)}</Badge>,
+                  <Text as="span" variant="bodySm" tone="subdued">
+                    {new Date(error.last_occurrence).toLocaleString()}
+                  </Text>,
+                  <Text as="span" variant="bodySm">{error.sample_message}</Text>
+                ])}
+              />
+            </div>
           </Card>
         )}
 
         {/* Log Filters and Table */}
         <Card>
           <div style={{ padding: '16px' }}>
-            <Stack alignment="center" spacing="loose">
-              <Stack alignment="center">
-                <div style={{ minWidth: '120px' }}>
-                  <Select
-                    label="Level"
-                    options={levelOptions}
-                    value={selectedLevel}
-                    onChange={setSelectedLevel}
-                  />
-                </div>
-                <div style={{ minWidth: '150px' }}>
-                  <Select
-                    label="Date Range"
-                    options={dateRangeOptions}
-                    value={selectedDateRange}
-                    onChange={setSelectedDateRange}
-                  />
-                </div>
-                <div style={{ minWidth: '200px' }}>
-                  <TextField
-                    label="Search"
-                    value={searchQuery}
-                    onChange={setSearchQuery}
-                    placeholder="Search messages..."
-                    clearButton
-                    onClearButtonClick={() => setSearchQuery('')}
-                  />
-                </div>
-              </Stack>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
+              <div style={{ minWidth: '120px' }}>
+                <Select
+                  label="Level"
+                  options={levelOptions}
+                  value={selectedLevel}
+                  onChange={setSelectedLevel}
+                />
+              </div>
+              <div style={{ minWidth: '150px' }}>
+                <Select
+                  label="Date Range"
+                  options={dateRangeOptions}
+                  value={selectedDateRange}
+                  onChange={setSelectedDateRange}
+                />
+              </div>
+              <div style={{ minWidth: '200px' }}>
+                <TextField
+                  label="Search"
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  placeholder="Search messages..."
+                  autoComplete="off"
+                  clearButton
+                  onClearButtonClick={() => setSearchQuery('')}
+                />
+              </div>
               <Button
                 variant="primary"
                 icon={SearchIcon}
@@ -334,60 +328,39 @@ const Analytics: React.FC = () => {
               >
                 Search
               </Button>
-            </Stack>
+            </div>
+
+            {logsData?.logs && (
+              <>
+                <DataTable
+                  columnContentTypes={['text', 'text', 'text', 'text', 'text']}
+                  headings={['Timestamp', 'Level', 'Source', 'Message', 'Actions']}
+                  rows={logsData.logs.map(renderLogRow)}
+                  truncate
+                />
+
+                {/* Pagination */}
+                <div style={{ padding: '16px', display: 'flex', justifyContent: 'center' }}>
+                  <ButtonGroup>
+                    <Button
+                      disabled={page === 1}
+                      onClick={() => setPage(page - 1)}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      disabled={!logsData.logs || logsData.logs.length < limit}
+                      onClick={() => setPage(page + 1)}
+                    >
+                      Next
+                    </Button>
+                  </ButtonGroup>
+                </div>
+              </>
+            )}
           </div>
-
-          {logsData?.logs && (
-            <>
-              <DataTable
-                columnContentTypes={['text', 'text', 'text', 'text', 'text']}
-                headings={['Timestamp', 'Level', 'Source', 'Message', 'Actions']}
-                rows={logsData.logs.map(renderLogRow)}
-                truncate
-              />
-
-              {/* Expanded log details */}
-              {logsData.logs.map((log) => (
-                expandedLogId === log.id && log.details && (
-                  <Collapsible key={`details-${log.id}`} id={`details-${log.id}`} open>
-                    <div style={{ padding: '16px', backgroundColor: '#f6f6f7', borderTop: '1px solid #e1e3e5' }}>
-                      <Text variant="headingXs" as="h4">Details:</Text>
-                      <pre style={{ 
-                        marginTop: '8px', 
-                        fontSize: '12px', 
-                        background: '#fff',
-                        padding: '12px',
-                        borderRadius: '4px',
-                        overflow: 'auto'
-                      }}>
-                        {JSON.stringify(log.details, null, 2)}
-                      </pre>
-                    </div>
-                  </Collapsible>
-                )
-              ))}
-
-              {/* Pagination */}
-              <div style={{ padding: '16px', display: 'flex', justifyContent: 'center' }}>
-                <ButtonGroup>
-                  <Button
-                    disabled={page === 1}
-                    onClick={() => setPage(page - 1)}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    disabled={!logsData.logs || logsData.logs.length < limit}
-                    onClick={() => setPage(page + 1)}
-                  >
-                    Next
-                  </Button>
-                </ButtonGroup>
-              </div>
-            </>
-          )}
         </Card>
-      </Stack>
+      </div>
 
       {/* Log Detail Modal */}
       <Modal
@@ -398,40 +371,40 @@ const Analytics: React.FC = () => {
       >
         {selectedLog && (
           <Modal.Section>
-            <Stack vertical spacing="loose">
-              <Stack>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ display: 'flex', gap: '32px' }}>
                 <div style={{ flex: 1 }}>
-                  <Text variant="headingXs" as="dt">Timestamp:</Text>
+                  <Text as="dt" variant="headingXs">Timestamp:</Text>
                   <Text as="dd">{new Date(selectedLog.timestamp).toLocaleString()}</Text>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <Text variant="headingXs" as="dt">Level:</Text>
+                  <Text as="dt" variant="headingXs">Level:</Text>
                   <Badge tone={getBadgeTone(selectedLog.level)}>
                     {selectedLog.level.toUpperCase()}
                   </Badge>
                 </div>
-              </Stack>
+              </div>
               
               <div>
-                <Text variant="headingXs" as="dt">Source:</Text>
+                <Text as="dt" variant="headingXs">Source:</Text>
                 <Text as="dd">{selectedLog.source}</Text>
               </div>
 
               <div>
-                <Text variant="headingXs" as="dt">Message:</Text>
+                <Text as="dt" variant="headingXs">Message:</Text>
                 <Text as="dd">{selectedLog.message}</Text>
               </div>
 
               {selectedLog.sync_id && (
                 <div>
-                  <Text variant="headingXs" as="dt">Sync ID:</Text>
+                  <Text as="dt" variant="headingXs">Sync ID:</Text>
                   <Text as="dd">{selectedLog.sync_id}</Text>
                 </div>
               )}
 
               {selectedLog.details && (
                 <div>
-                  <Text variant="headingXs" as="dt">Details:</Text>
+                  <Text as="dt" variant="headingXs">Details:</Text>
                   <pre style={{
                     background: '#f6f6f7',
                     padding: '12px',
@@ -444,7 +417,7 @@ const Analytics: React.FC = () => {
                   </pre>
                 </div>
               )}
-            </Stack>
+            </div>
           </Modal.Section>
         )}
       </Modal>
