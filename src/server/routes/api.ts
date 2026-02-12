@@ -1213,4 +1213,48 @@ router.post('/api/auto-list/:shopifyProductId', async (req: Request, res: Respon
   }
 });
 
+/** POST /api/admin/backfill-shopify-metadata — Backfill shopify_title/price/sku for existing products */
+router.post('/api/admin/backfill-shopify-metadata', async (_req: Request, res: Response) => {
+  try {
+    const db = await getRawDb();
+    const tokenRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`).get() as any;
+    if (!tokenRow?.access_token) {
+      res.status(400).json({ error: 'No Shopify token' });
+      return;
+    }
+
+    const rows = db.prepare(`SELECT id, shopify_product_id FROM product_mappings WHERE shopify_title IS NULL`).all() as any[];
+    let updated = 0;
+
+    for (const row of rows) {
+      try {
+        const response = await fetch(
+          `https://usedcameragear.myshopify.com/admin/api/2024-01/products/${row.shopify_product_id}.json`,
+          { headers: { 'X-Shopify-Access-Token': tokenRow.access_token } }
+        );
+        if (response.ok) {
+          const data = await response.json() as any;
+          const product = data.product;
+          const variant = product.variants?.[0];
+          db.prepare(
+            `UPDATE product_mappings SET shopify_title = ?, shopify_price = ?, shopify_sku = ?, updated_at = ? WHERE id = ?`
+          ).run(
+            product.title || null,
+            variant?.price ? parseFloat(variant.price) : null,
+            variant?.sku || null,
+            Math.floor(Date.now() / 1000),
+            row.id
+          );
+          updated++;
+        }
+      } catch { /* skip individual product errors */ }
+    }
+
+    info(`[Admin] Backfilled Shopify metadata for ${updated}/${rows.length} products`);
+    res.json({ ok: true, updated, total: rows.length });
+  } catch (err) {
+    res.status(500).json({ error: 'Backfill failed', detail: String(err) });
+  }
+});
+
 export default router;
