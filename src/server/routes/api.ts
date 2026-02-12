@@ -438,4 +438,59 @@ router.post('/api/orders/cleanup', async (req: Request, res: Response) => {
   }
 });
 
+/** POST /api/test/create-product — Create a test product in Shopify for sync testing */
+router.post('/api/test/create-product', async (req: Request, res: Response) => {
+  try {
+    const db = await getRawDb();
+    const tokenRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`).get() as any;
+    if (!tokenRow?.access_token) {
+      res.status(400).json({ error: 'No Shopify token' });
+      return;
+    }
+
+    const title = (req.body.title as string) || 'Camera Cleaning Kit - Basic';
+    const price = (req.body.price as string) || '19.99';
+    const inventory = parseInt(req.body.inventory as string) || 3;
+
+    const product = {
+      product: {
+        title,
+        body_html: `<p>Basic camera cleaning kit. Includes lens cloth, blower, and brush.</p>`,
+        vendor: 'Pictureline',
+        product_type: 'Accessories',
+        tags: 'test,ebay-sync-test,Used',
+        variants: [{
+          price,
+          sku: `TEST-${Date.now()}`,
+          inventory_management: 'shopify',
+          inventory_quantity: inventory,
+          barcode: '0000000000000',
+        }],
+        status: 'active',
+      },
+    };
+
+    const response = await fetch('https://usedcameragear.myshopify.com/admin/api/2024-01/products.json', {
+      method: 'POST',
+      headers: {
+        'X-Shopify-Access-Token': tokenRow.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(product),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      res.status(500).json({ error: 'Failed to create product', detail: errText });
+      return;
+    }
+
+    const data = await response.json() as any;
+    info(`[API] Test product created: ${data.product.id} — ${data.product.title}`);
+    res.json({ ok: true, product: { id: data.product.id, title: data.product.title, variants: data.product.variants } });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', detail: String(err) });
+  }
+});
+
 export default router;
