@@ -50,22 +50,28 @@ export const updateEbayInventory = async (
     if (quantity === 0) {
       info(`🚨 Inventory → 0 for ${sku} — ENDING eBay listing`);
       
-      // Update inventory item to 0 first
-      await updateInventoryQuantity(ebayToken, sku, 0);
-      
-      // Withdraw (end) the offer if it's published
-      if (offer?.offerId && offer.listingId) {
+      // Step 1: Withdraw (end) the offer FIRST — eBay rejects qty=0 on published offers
+      if (offer?.offerId) {
         try {
           await withdrawOffer(ebayToken, offer.offerId);
           info(`✅ eBay listing ENDED for SKU ${sku} (offer ${offer.offerId})`);
         } catch (withdrawErr: any) {
           // Offer may already be unpublished
-          if (withdrawErr.message?.includes('INVALID_OFFER_STATUS')) {
+          if (withdrawErr.message?.includes('INVALID_OFFER_STATUS') || 
+              withdrawErr.message?.includes('25014')) {
             info(`Offer ${offer.offerId} was already unpublished/ended`);
           } else {
             throw withdrawErr;
           }
         }
+      }
+      
+      // Step 2: Now set inventory to 0 (safe since listing is ended)
+      try {
+        await updateInventoryQuantity(ebayToken, sku, 0);
+      } catch (invErr: any) {
+        // Some eBay errors on 0-qty are acceptable after withdraw
+        info(`Note: Could not set qty to 0 after withdraw: ${invErr.message?.substring(0, 100)}`);
       }
       
       // Update local mapping status to 'ended'
