@@ -48,6 +48,24 @@ export interface OrderMapping {
   createdAt: string;
 }
 
+export interface AttributeMapping {
+  category: string;
+  field_name: string;
+  mapping_type: 'shopify_field' | 'constant' | 'formula' | 'edit_in_grid';
+  source_value: string | null;
+  target_value: string | null;
+  variation_mapping: string | null;
+  is_enabled: boolean;
+  display_order: number;
+}
+
+export interface MappingsResponse {
+  sales: AttributeMapping[];
+  listing: AttributeMapping[];
+  payment: AttributeMapping[];
+  shipping: AttributeMapping[];
+}
+
 // API client
 class ApiClient {
   private baseUrl = '/api';
@@ -63,6 +81,20 @@ class ApiClient {
   async post<T>(endpoint: string, data?: any): Promise<T> {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: data ? JSON.stringify(data) : undefined,
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json();
+  }
+
+  async put<T>(endpoint: string, data?: any): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
       },
@@ -125,8 +157,16 @@ export const useOrders = () => {
 export const useMappings = () => {
   return useQuery({
     queryKey: ['mappings'],
-    queryFn: () => api.get('/mappings'),
+    queryFn: () => api.get<MappingsResponse>('/mappings'),
     staleTime: 60000, // 1 minute
+  });
+};
+
+export const useMappingsCategory = (category: string) => {
+  return useQuery({
+    queryKey: ['mappings', category],
+    queryFn: () => api.get<{ data: AttributeMapping[] }>(`/mappings/${category}`),
+    staleTime: 60000,
   });
 };
 
@@ -224,6 +264,65 @@ export const useSyncInventory = () => {
   });
 };
 
+// Mapping mutation hooks
+export const useUpdateMapping = () => {
+  const queryClient = useQueryClient();
+  const { addNotification } = useAppStore();
+
+  return useMutation({
+    mutationFn: ({ category, fieldName, updates }: {
+      category: string;
+      fieldName: string;
+      updates: Partial<AttributeMapping>;
+    }) => {
+      return api.put(`/mappings/${category}/${fieldName}`, updates);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['mappings'] });
+      addNotification({
+        type: 'success',
+        title: 'Mapping updated successfully',
+        autoClose: 3000,
+      });
+    },
+    onError: (error) => {
+      addNotification({
+        type: 'error',
+        title: 'Failed to update mapping',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        autoClose: 5000,
+      });
+    },
+  });
+};
+
+export const useBulkUpdateMappings = () => {
+  const queryClient = useQueryClient();
+  const { addNotification } = useAppStore();
+
+  return useMutation({
+    mutationFn: (mappings: AttributeMapping[]) => {
+      return api.post('/mappings/bulk', { mappings });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['mappings'] });
+      addNotification({
+        type: 'success',
+        title: 'Mappings updated successfully',
+        autoClose: 3000,
+      });
+    },
+    onError: (error) => {
+      addNotification({
+        type: 'error',
+        title: 'Failed to update mappings',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        autoClose: 5000,
+      });
+    },
+  });
+};
+
 // New hooks for enhanced pages
 
 export const useListings = (params?: {
@@ -295,6 +394,33 @@ export const useSettings = () => {
     queryKey: ['settings'],
     queryFn: () => api.get('/settings'),
     staleTime: 300000, // 5 minutes
+  });
+};
+
+export const useUpdateSettings = () => {
+  const queryClient = useQueryClient();
+  const { addNotification } = useAppStore();
+
+  return useMutation({
+    mutationFn: (settings: Record<string, any>) => {
+      return api.put('/settings', settings);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
+      addNotification({
+        type: 'success',
+        title: 'Settings updated successfully',
+        autoClose: 3000,
+      });
+    },
+    onError: (error) => {
+      addNotification({
+        type: 'error',
+        title: 'Failed to update settings',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        autoClose: 5000,
+      });
+    },
   });
 };
 

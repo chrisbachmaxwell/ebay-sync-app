@@ -22,15 +22,15 @@ import {
   Zap,
   BarChart3
 } from 'lucide-react';
-import { useStatus, useLogs, useSyncProducts, useSyncOrders, useSyncInventory } from '../hooks/useApi';
+import { useStatus, useLogs, useSyncProducts, useSyncOrders, useSyncInventory, useListingHealth } from '../hooks/useApi';
 import { useAppStore } from '../store';
 import StatusIndicator from '../components/StatusIndicator';
 import MetricCard from '../components/MetricCard';
 
 const Dashboard: React.FC = () => {
   const { data: statusData, isLoading, error } = useStatus();
-  const status = statusData as any; // Cast to handle flexible API response
   const { data: logsData } = useLogs(10);
+  const { data: healthData } = useListingHealth();
   const { notifications } = useAppStore();
   
   const syncProducts = useSyncProducts();
@@ -97,17 +97,17 @@ const Dashboard: React.FC = () => {
                 ) : (
                   <StatusIndicator
                     type="sync"
-                    status={status?.status === 'running' ? 'syncing' : status?.status === 'error' ? 'error' : 'idle'}
+                    status={statusData?.status === 'running' ? 'syncing' : statusData?.status === 'error' ? 'error' : 'idle'}
                     size="lg"
                   />
                 )}
               </div>
               <Text variant="headingXl" as="h2">
-                {isLoading ? 'Loading...' : `System ${status?.status || 'Unknown'}`}
+                {isLoading ? 'Loading...' : `System ${statusData?.status || 'Unknown'}`}
               </Text>
               <Text variant="bodyLg" tone="subdued" as="p">
-                {status?.lastSyncs?.[0] ? 
-                  `Last sync: ${formatDateTime(status.lastSyncs[0].timestamp || status.lastSyncs[0].createdAt)}` : 
+                {statusData?.lastSyncs?.[0] ? 
+                  `Last sync: ${formatDateTime((statusData.lastSyncs[0] as any).timestamp || (statusData.lastSyncs[0] as any).createdAt)}` : 
                   'No recent sync activity'
                 }
               </Text>
@@ -147,7 +147,7 @@ const Dashboard: React.FC = () => {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
             <MetricCard
               title="Products Mapped"
-              value={status?.products?.mapped || 0}
+              value={statusData?.products?.mapped || 0}
               icon={<Package className="w-5 h-5" />}
               color="shopify"
               loading={isLoading}
@@ -156,7 +156,7 @@ const Dashboard: React.FC = () => {
             
             <MetricCard
               title="Orders Imported"
-              value={status?.orders?.imported || 0}
+              value={statusData?.orders?.imported || 0}
               icon={<ShoppingCart className="w-5 h-5" />}
               color="ebay"
               loading={isLoading}
@@ -165,7 +165,7 @@ const Dashboard: React.FC = () => {
             
             <MetricCard
               title="Inventory Synced"
-              value={status?.inventory?.synced || 0}
+              value={statusData?.inventory?.synced || 0}
               icon={<CheckCircle className="w-5 h-5" />}
               color="success"
               loading={isLoading}
@@ -174,7 +174,7 @@ const Dashboard: React.FC = () => {
             
             <MetricCard
               title="Pending Sync"
-              value={status?.products?.pending || status?.orders?.pending || 0}
+              value={statusData?.products?.pending || statusData?.orders?.pending || 0}
               icon={<AlertTriangle className="w-5 h-5" />}
               color="warning"
               loading={isLoading}
@@ -182,7 +182,7 @@ const Dashboard: React.FC = () => {
             
             <MetricCard
               title="Failed Items"
-              value={status?.products?.failed || 0}
+              value={statusData?.products?.failed || 0}
               icon={<Zap className="w-5 h-5" />}
               color="error"
               loading={isLoading}
@@ -190,7 +190,7 @@ const Dashboard: React.FC = () => {
             
             <MetricCard
               title="Revenue Today"
-              value={`$${(status?.revenue?.today || 0).toLocaleString()}`}
+              value={`$${(statusData?.revenue?.today || 0).toLocaleString()}`}
               icon={<DollarSign className="w-5 h-5" />}
               color="success"
               loading={isLoading}
@@ -215,7 +215,7 @@ const Dashboard: React.FC = () => {
                 </div>
                 <StatusIndicator
                   type="connection"
-                  status={status?.shopifyConnected ? 'connected' : 'disconnected'}
+                  status={statusData?.shopifyConnected ? 'connected' : 'disconnected'}
                   platform="shopify"
                   size="sm"
                 />
@@ -230,7 +230,7 @@ const Dashboard: React.FC = () => {
                 </div>
                 <StatusIndicator
                   type="connection"
-                  status={status?.ebayConnected ? 'connected' : 'disconnected'}
+                  status={statusData?.ebayConnected ? 'connected' : 'disconnected'}
                   platform="ebay"
                   size="sm"
                 />
@@ -284,7 +284,7 @@ const Dashboard: React.FC = () => {
                   Uptime
                 </Text>
                 <Text variant="bodyLg" as="p">
-                  {status?.uptime ? Math.floor(status.uptime / 3600) : 0}h
+                  {statusData?.uptime ? Math.floor(statusData.uptime / 3600) : 0}h
                 </Text>
               </div>
               
@@ -311,7 +311,7 @@ const Dashboard: React.FC = () => {
                   Last Restart
                 </Text>
                 <Text variant="bodyLg" as="p">
-                  {formatDateTime(Date.now() - (status?.uptime || 0) * 1000)}
+                  {statusData?.uptime ? formatDateTime(Date.now() - statusData.uptime * 1000) : '—'}
                 </Text>
               </div>
             </div>

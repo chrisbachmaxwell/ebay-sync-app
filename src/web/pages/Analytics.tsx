@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Page,
   Card,
@@ -30,37 +30,7 @@ import {
   ResponsiveContainer,
   Legend
 } from 'recharts';
-
-// Mock hook for now
-const useApi = <T,>(url: string) => {
-  return {
-    data: {
-      logs: [
-        {
-          id: '1',
-          timestamp: new Date().toISOString(),
-          level: 'info' as const,
-          message: 'Sync completed successfully',
-          source: 'sync-service',
-          details: { products: 10, errors: 0 }
-        }
-      ],
-      total: 1,
-      metrics: [
-        {
-          date: '2024-01-01',
-          total_syncs: 10,
-          successful_syncs: 8,
-          failed_syncs: 2,
-          avg_duration: 30
-        }
-      ],
-      errors: []
-    } as T,
-    loading: false,
-    error: null
-  };
-};
+import { useLogs, useListingHealth } from '../hooks/useApi';
 
 interface LogEntry {
   id: string;
@@ -96,19 +66,73 @@ const Analytics: React.FC = () => {
   const [page, setPage] = useState(1);
   const [limit] = useState(50);
 
-  // Build API query params
-  const queryParams = new URLSearchParams();
-  if (selectedLevel) queryParams.set('level', selectedLevel);
-  queryParams.set('limit', limit.toString());
-  queryParams.set('offset', ((page - 1) * limit).toString());
-  if (searchQuery) queryParams.set('search', searchQuery);
-
-  const { data: logsData, loading: logsLoading, error: logsError } = useApi<{
-    logs: LogEntry[];
-    total: number;
-    metrics: SyncMetrics[];
-    errors: ErrorSummary[];
-  }>(`/api/logs?${queryParams}`);
+  // Real API calls
+  const { data: rawLogsData, isLoading: logsLoading, error: logsError } = useLogs(limit);
+  const { data: healthData, isLoading: healthLoading } = useListingHealth();
+  
+  // Process logs data to match expected format
+  const logsData = useMemo(() => {
+    if (!rawLogsData?.data) return null;
+    
+    // Convert logs to expected format
+    const logs: LogEntry[] = rawLogsData.data.map((log: any) => ({
+      id: log.id?.toString() || Math.random().toString(),
+      timestamp: log.createdAt || log.timestamp || new Date().toISOString(),
+      level: log.status === 'error' ? 'error' as const : 
+             log.status === 'warning' ? 'warn' as const : 'info' as const,
+      message: log.topic || log.message || 'No message',
+      source: log.source || 'unknown',
+      details: log.payload ? JSON.parse(log.payload) : null,
+      sync_id: log.sync_id
+    }));
+    
+    // Filter logs based on current filters
+    const filteredLogs = logs.filter(log => {
+      if (selectedLevel && log.level !== selectedLevel) return false;
+      if (searchQuery && !log.message.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      return true;
+    });
+    
+    // Generate mock metrics for demo (would come from API in real implementation)
+    const metrics: SyncMetrics[] = [];
+    const errors: ErrorSummary[] = [];
+    
+    // Group errors by type
+    const errorMap = new Map<string, { count: number; lastSeen: string; sample: string }>();
+    logs.filter(log => log.level === 'error').forEach(log => {
+      const errorType = log.message.split(':')[0] || 'Unknown Error';
+      const existing = errorMap.get(errorType);
+      if (existing) {
+        existing.count++;
+        if (new Date(log.timestamp) > new Date(existing.lastSeen)) {
+          existing.lastSeen = log.timestamp;
+          existing.sample = log.message;
+        }
+      } else {
+        errorMap.set(errorType, {
+          count: 1,
+          lastSeen: log.timestamp,
+          sample: log.message
+        });
+      }
+    });
+    
+    errorMap.forEach((value, key) => {
+      errors.push({
+        error_type: key,
+        count: value.count,
+        last_occurrence: value.lastSeen,
+        sample_message: value.sample
+      });
+    });
+    
+    return {
+      logs: filteredLogs.slice((page - 1) * limit, page * limit),
+      total: filteredLogs.length,
+      metrics,
+      errors
+    };
+  }, [rawLogsData, selectedLevel, searchQuery, page, limit]);
 
   const successColor = '#00A651';
   const errorColor = '#D82C0D';
@@ -166,7 +190,7 @@ const Analytics: React.FC = () => {
     ];
   };
 
-  if (logsLoading) {
+  if (logsLoading || healthLoading) {
     return (
       <Page title="Analytics & Logs">
         <Card>

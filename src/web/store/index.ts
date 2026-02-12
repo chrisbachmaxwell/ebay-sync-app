@@ -31,7 +31,11 @@ interface AppStore {
   ebayConnected: boolean;
   
   // Notifications
-  notifications: Notification[];
+  notifications: NotificationState[];
+  
+  // Mappings State
+  unsavedMappingChanges: Map<string, any>;
+  savingMappings: boolean;
   
   // Actions
   toggleSidebar: () => void;
@@ -40,7 +44,7 @@ interface AppStore {
   addSyncOperation: (operation: string) => void;
   removeSyncOperation: (operation: string) => void;
   setConnectionStatus: (platform: 'shopify' | 'ebay', connected: boolean) => void;
-  addNotification: (notification: Omit<Notification, 'id' | 'timestamp'>) => void;
+  addNotification: (notification: Omit<NotificationState, 'id' | 'timestamp'>) => void;
   removeNotification: (id: string) => void;
   clearNotifications: () => void;
   
@@ -48,9 +52,15 @@ interface AppStore {
   addChatMessage: (message: Omit<ChatMessage, 'id'>) => void;
   setChatLoading: (loading: boolean) => void;
   clearChatHistory: () => void;
+  
+  // Mapping Actions
+  setUnsavedMappingChange: (key: string, value: any) => void;
+  removeUnsavedMappingChange: (key: string) => void;
+  clearUnsavedMappingChanges: () => void;
+  setSavingMappings: (saving: boolean) => void;
 }
 
-interface Notification {
+interface NotificationState {
   id: string;
   type: 'info' | 'success' | 'warning' | 'error';
   title: string;
@@ -78,6 +88,8 @@ export const useAppStore = create<AppStore>()(subscribeWithSelector((set) => ({
     shopifyConnected: false,
     ebayConnected: false,
     notifications: [],
+    unsavedMappingChanges: new Map(),
+    savingMappings: false,
     
     // Actions
     toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
@@ -154,4 +166,23 @@ export const useAppStore = create<AppStore>()(subscribeWithSelector((set) => ({
         }
       ]
     }),
+    
+    // Mapping Actions
+    setUnsavedMappingChange: (key, value) =>
+      set((state) => {
+        const newChanges = new Map(state.unsavedMappingChanges);
+        newChanges.set(key, value);
+        return { unsavedMappingChanges: newChanges };
+      }),
+    
+    removeUnsavedMappingChange: (key) =>
+      set((state) => {
+        const newChanges = new Map(state.unsavedMappingChanges);
+        newChanges.delete(key);
+        return { unsavedMappingChanges: newChanges };
+      }),
+    
+    clearUnsavedMappingChanges: () => set({ unsavedMappingChanges: new Map() }),
+    
+    setSavingMappings: (saving) => set({ savingMappings: saving }),
   })));
