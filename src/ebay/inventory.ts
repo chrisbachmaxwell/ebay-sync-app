@@ -174,6 +174,55 @@ export const updateOffer = async (
 };
 
 /**
+ * Create or update an inventory location on eBay.
+ * PUT /sell/inventory/v1/location/{merchantLocationKey}
+ */
+export const createOrUpdateLocation = async (
+  accessToken: string,
+  locationKey: string,
+  location: {
+    name: string;
+    location: {
+      address: {
+        addressLine1: string;
+        city: string;
+        stateOrProvince: string;
+        postalCode: string;
+        country: string; // ISO 3166-1 alpha-2, e.g. 'US'
+      };
+    };
+    merchantLocationStatus: string; // 'ENABLED'
+    locationTypes: string[]; // ['WAREHOUSE']
+  },
+): Promise<void> => {
+  await ebayRequest({
+    method: 'POST',
+    path: `/sell/inventory/v1/location/${encodeURIComponent(locationKey)}`,
+    accessToken,
+    body: location,
+    headers: { 'Content-Language': 'en-US' },
+  });
+};
+
+/**
+ * Get an inventory location.
+ */
+export const getLocation = async (
+  accessToken: string,
+  locationKey: string,
+): Promise<any | null> => {
+  try {
+    return await ebayRequest({
+      path: `/sell/inventory/v1/location/${encodeURIComponent(locationKey)}`,
+      accessToken,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('404')) return null;
+    throw err;
+  }
+};
+
+/**
  * Publish an offer (makes it a live listing on eBay).
  * POST /sell/inventory/v1/offer/{offerId}/publish
  */

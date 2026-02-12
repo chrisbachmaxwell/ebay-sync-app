@@ -4,6 +4,8 @@ import {
   createOffer,
   publishOffer,
   getInventoryItem,
+  getLocation,
+  createOrUpdateLocation,
   type EbayInventoryItem,
   type EbayOffer,
 } from '../ebay/inventory.js';
@@ -123,6 +125,7 @@ const mapShopifyProductToEbay = async (
       paymentPolicyId: DEFAULT_POLICIES.paymentPolicyId,
       returnPolicyId: DEFAULT_POLICIES.returnPolicyId,
     },
+    merchantLocationKey: 'pictureline-slc',
     categoryId,
     tax: {
       applyTax: true,
@@ -231,6 +234,28 @@ const syncProductToEbay = async (
     if (options.dryRun) {
       info(`[DRY RUN] Would create eBay listing: ${product.title} (SKU: ${variant.sku})`);
       return { success: true };
+    }
+    
+    // Ensure eBay inventory location exists
+    const locationKey = 'pictureline-slc';
+    const existingLocation = await getLocation(ebayToken, locationKey);
+    if (!existingLocation) {
+      info(`Creating eBay inventory location: ${locationKey}`);
+      await createOrUpdateLocation(ebayToken, locationKey, {
+        name: 'Pictureline - Salt Lake City',
+        location: {
+          address: {
+            addressLine1: '305 W 700 S',
+            city: 'Salt Lake City',
+            stateOrProvince: 'UT',
+            postalCode: '84101',
+            country: 'US',
+          },
+        },
+        merchantLocationStatus: 'ENABLED',
+        locationTypes: ['WAREHOUSE'],
+      });
+      info(`Created eBay inventory location: ${locationKey}`);
     }
     
     // Check if inventory item already exists on eBay
