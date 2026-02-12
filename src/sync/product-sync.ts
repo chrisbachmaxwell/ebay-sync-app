@@ -479,3 +479,176 @@ export const autoSyncNewProducts = async (
   info(`[AutoSync] Found ${unmappedProducts.length} new products to sync`);
   return syncProducts(ebayToken, shopifyToken, unmappedProducts, settings);
 };
+
+/**
+ * Update an existing eBay listing from Shopify product data.
+ * Updates inventory item (title, description, images, etc.) and offer (price).
+ * Does NOT delete/recreate the offer — preserves listing history.
+ */
+export const updateProductOnEbay = async (
+  ebayToken: string,
+  shopifyToken: string,
+  productId: string,
+  settings: Record<string, string> = {},
+): Promise<{ success: boolean; error?: string; updated: string[] }> => {
+  const updated: string[] = [];
+  
+  try {
+    const db = await getDb();
+    
+    // Find existing mapping
+    const mapping = await db
+      .select()
+      .from(productMappings)
+      .where(eq(productMappings.shopifyProductId, productId))
+      .get();
+    
+    if (!mapping || !mapping.ebayInventoryItemId) {
+      return { success: false, error: 'Product not mapped to eBay', updated };
+    }
+    
+    const sku = mapping.ebayInventoryItemId;
+    
+    // Get current Shopify product data
+    const product = await fetchDetailedShopifyProduct(shopifyToken, productId);
+    if (!product) {
+      return { success: false, error: 'Product not found in Shopify', updated };
+    }
+    
+    const variant = product.variants[0];
+    if (!variant) {
+      return { success: false, error: 'No variant found', updated };
+    }
+    
+    // Fetch business policies if not cached
+    if (!cachedPolicies) {
+      cachedPolicies = await getBusinessPolicies(ebayToken);
+    }
+    
+    // Map to eBay format
+    const { inventoryItem, offer } = await mapShopifyProductToEbay(product, variant, settings);
+    
+    // Update inventory item (title, description, images, aspects, quantity)
+    await createOrReplaceInventoryItem(ebayToken, sku, inventoryItem);
+    updated.push('inventoryItem');
+    info(`Updated eBay inventory item: ${sku} — title="${inventoryItem.product.title}"`);
+    
+    // Update offer (price, policies) if it exists
+    const offersResult = await getOffersBySku(ebayToken, sku);
+    const existingOffer = offersResult.offers?.[0];
+    
+    if (existingOffer?.offerId) {
+      // Build the full offer update (eBay requires all fields on PUT)
+      const { updateOffer } = await import('../ebay/inventory.js');
+      await updateOffer(ebayToken, existingOffer.offerId, {
+        ...offer,
+        sku,
+        availableQuantity: inventoryItem.availability.shipToLocationAvailability.quantity,
+      });
+      updated.push('offer');
+      info(`Updated eBay offer: ${existingOffer.offerId} — price=$${offer.pricingSummary.price.value}`);
+    }
+    
+    // Log sync
+    await db
+      .insert(syncLog)
+      .values({
+        direction: 'shopify_to_ebay',
+        entityType: 'product',
+        entityId: productId,
+        status: 'success',
+        detail: `Updated: ${updated.join(', ')}`,
+        createdAt: new Date(),
+      })
+      .run();
+    
+    // Update mapping timestamp
+    await db
+      .update(productMappings)
+      .set({ updatedAt: new Date() })
+      .where(eq(productMappings.shopifyProductId, productId))
+      .run();
+    
+    return { success: true, updated };
+    
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    logError(`Failed to update eBay product for Shopify ${productId}: ${errorMsg}`);
+    return { success: false, error: errorMsg, updated };
+  }
+};
+
+/**
+ * End an eBay listing when a Shopify product is deleted/archived.
+ * Withdraws the offer and updates mapping status to 'ended'.
+ */
+export const endEbayListing = async (
+  ebayToken: string,
+  productId: string,
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const db = await getDb();
+    
+    // Find mapping
+    const mapping = await db
+      .select()
+      .from(productMappings)
+      .where(eq(productMappings.shopifyProductId, productId))
+      .get();
+    
+    if (!mapping || !mapping.ebayInventoryItemId) {
+      return { success: false, error: 'Product not mapped to eBay' };
+    }
+    
+    if (mapping.status === 'ended') {
+      return { success: false, error: 'Listing already ended' };
+    }
+    
+    const sku = mapping.ebayInventoryItemId;
+    const { withdrawOffer: doWithdraw, getOffersBySku: getOffers } = await import('../ebay/inventory.js');
+    
+    // Get the offer
+    const offersResult = await getOffers(ebayToken, sku);
+    const offer = offersResult.offers?.[0];
+    
+    if (offer?.offerId) {
+      try {
+        await doWithdraw(ebayToken, offer.offerId);
+        info(`✅ eBay listing ENDED for Shopify product ${productId} (offer ${offer.offerId})`);
+      } catch (err: any) {
+        if (err.message?.includes('INVALID_OFFER_STATUS') || err.message?.includes('25014')) {
+          info(`Offer ${offer.offerId} was already unpublished`);
+        } else {
+          throw err;
+        }
+      }
+    }
+    
+    // Update mapping
+    await db
+      .update(productMappings)
+      .set({ status: 'ended', updatedAt: new Date() })
+      .where(eq(productMappings.shopifyProductId, productId))
+      .run();
+    
+    // Log
+    await db
+      .insert(syncLog)
+      .values({
+        direction: 'shopify_to_ebay',
+        entityType: 'product',
+        entityId: productId,
+        status: 'success',
+        detail: `Listing ENDED (product archived/deleted)`,
+        createdAt: new Date(),
+      })
+      .run();
+    
+    return { success: true };
+    
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    logError(`Failed to end eBay listing for Shopify ${productId}: ${errorMsg}`);
+    return { success: false, error: errorMsg };
+  }
+};

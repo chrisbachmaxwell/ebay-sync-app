@@ -499,6 +499,53 @@ router.get('/api/test/ebay-offer/:sku', async (req: Request, res: Response) => {
   }
 });
 
+/** PUT /api/sync/products/:productId — Update existing eBay listing from Shopify */
+router.put('/api/sync/products/:productId', async (req: Request, res: Response) => {
+  try {
+    const db = await getRawDb();
+    const productId = Array.isArray(req.params.productId) ? req.params.productId[0] : req.params.productId;
+    
+    const ebayRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'ebay'`).get() as any;
+    const shopifyRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`).get() as any;
+    
+    if (!ebayRow?.access_token || !shopifyRow?.access_token) {
+      res.status(400).json({ error: 'Missing eBay or Shopify token' });
+      return;
+    }
+    
+    const settings = db.prepare(`SELECT * FROM settings`).all() as any[];
+    const settingsObj = Object.fromEntries(settings.map((s) => [s.key, s.value]));
+    
+    const { updateProductOnEbay } = await import('../../sync/product-sync.js');
+    const result = await updateProductOnEbay(ebayRow.access_token, shopifyRow.access_token, productId, settingsObj);
+    
+    res.json({ ok: result.success, productId, updated: result.updated, error: result.error });
+  } catch (err) {
+    res.status(500).json({ error: 'Product update failed', detail: String(err) });
+  }
+});
+
+/** POST /api/sync/products/:productId/end — End an eBay listing (product archived/deleted) */
+router.post('/api/sync/products/:productId/end', async (req: Request, res: Response) => {
+  try {
+    const db = await getRawDb();
+    const productId = Array.isArray(req.params.productId) ? req.params.productId[0] : req.params.productId;
+    
+    const ebayRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'ebay'`).get() as any;
+    if (!ebayRow?.access_token) {
+      res.status(400).json({ error: 'No eBay token' });
+      return;
+    }
+    
+    const { endEbayListing } = await import('../../sync/product-sync.js');
+    const result = await endEbayListing(ebayRow.access_token, productId);
+    
+    res.json({ ok: result.success, productId, error: result.error });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to end listing', detail: String(err) });
+  }
+});
+
 /** POST /api/listings/link — Manually link eBay listing to Shopify product */
 router.post('/api/listings/link', async (req: Request, res: Response) => {
   try {
