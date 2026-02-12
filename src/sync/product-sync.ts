@@ -8,6 +8,7 @@ import {
   createOrUpdateLocation,
   getOffersBySku,
   deleteOffer,
+  getBusinessPolicies,
   type EbayInventoryItem,
   type EbayOffer,
 } from '../ebay/inventory.js';
@@ -36,14 +37,9 @@ export interface ProductSyncResult {
 }
 
 /**
- * Default eBay business policies for Used Camera Gear.
- * These should be configurable via settings in a real implementation.
+ * Cached business policies (fetched once per sync run).
  */
-const DEFAULT_POLICIES = {
-  fulfillmentPolicyId: '8031490000', // You need to get actual policy IDs from eBay
-  paymentPolicyId: '8031491000',
-  returnPolicyId: '8031492000',
-};
+let cachedPolicies: { fulfillmentPolicyId: string; paymentPolicyId: string; returnPolicyId: string } | null = null;
 
 /**
  * Default item location from settings.
@@ -133,9 +129,9 @@ const mapShopifyProductToEbay = async (
       },
     },
     listingPolicies: {
-      fulfillmentPolicyId: DEFAULT_POLICIES.fulfillmentPolicyId,
-      paymentPolicyId: DEFAULT_POLICIES.paymentPolicyId,
-      returnPolicyId: DEFAULT_POLICIES.returnPolicyId,
+      fulfillmentPolicyId: cachedPolicies?.fulfillmentPolicyId || '',
+      paymentPolicyId: cachedPolicies?.paymentPolicyId || '',
+      returnPolicyId: cachedPolicies?.returnPolicyId || '',
     },
     merchantLocationKey: 'pictureline-slc',
     categoryId,
@@ -372,6 +368,13 @@ export const syncProducts = async (
   };
   
   info(`Starting product sync for ${productIds.length} products...`);
+  
+  // Fetch real business policies from eBay (cached per sync run)
+  if (!cachedPolicies) {
+    info('Fetching eBay business policies...');
+    cachedPolicies = await getBusinessPolicies(ebayToken);
+    info(`Policies: fulfillment=${cachedPolicies.fulfillmentPolicyId}, payment=${cachedPolicies.paymentPolicyId}, return=${cachedPolicies.returnPolicyId}`);
+  }
   
   for (const productId of productIds) {
     result.processed++;

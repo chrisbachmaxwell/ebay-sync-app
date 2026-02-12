@@ -195,6 +195,39 @@ export const getOffersBySku = async (
 };
 
 /**
+ * Get seller's business policies (fulfillment, payment, return).
+ * GET /sell/account/v1/fulfillment_policy, /payment_policy, /return_policy
+ */
+export const getBusinessPolicies = async (
+  accessToken: string,
+): Promise<{ fulfillmentPolicyId: string; paymentPolicyId: string; returnPolicyId: string }> => {
+  const [fulfillment, payment, returnPolicy] = await Promise.all([
+    ebayRequest<{ fulfillmentPolicies?: Array<{ fulfillmentPolicyId: string; name: string }> }>({
+      path: '/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US',
+      accessToken,
+    }),
+    ebayRequest<{ paymentPolicies?: Array<{ paymentPolicyId: string; name: string }> }>({
+      path: '/sell/account/v1/payment_policy?marketplace_id=EBAY_US',
+      accessToken,
+    }),
+    ebayRequest<{ returnPolicies?: Array<{ returnPolicyId: string; name: string }> }>({
+      path: '/sell/account/v1/return_policy?marketplace_id=EBAY_US',
+      accessToken,
+    }),
+  ]);
+
+  const fpId = fulfillment.fulfillmentPolicies?.[0]?.fulfillmentPolicyId;
+  const ppId = payment.paymentPolicies?.[0]?.paymentPolicyId;
+  const rpId = returnPolicy.returnPolicies?.[0]?.returnPolicyId;
+
+  if (!fpId || !ppId || !rpId) {
+    throw new Error(`Missing eBay business policies: fulfillment=${fpId}, payment=${ppId}, return=${rpId}. Set up policies in eBay Seller Hub.`);
+  }
+
+  return { fulfillmentPolicyId: fpId, paymentPolicyId: ppId, returnPolicyId: rpId };
+};
+
+/**
  * Delete an offer.
  * DELETE /sell/inventory/v1/offer/{offerId}
  */
