@@ -95,15 +95,16 @@ const mapShopifyProductToEbay = async (
   const effectiveUpc = upc && upc !== '0000000000000' && upc !== '000000000000' ? upc : undefined;
 
   // Build item specifics (aspects) — eBay requires these for most categories
+  const productType = shopifyProduct.productType || 'Camera Accessory';
   const aspects: Record<string, string[]> = {
     'Brand': [brand],
     'MPN': [mpn],
-    'Type': [shopifyProduct.productType || 'Camera Accessory'],
+    'Type': [productType],
+    'Compatible Brand': ['Universal'],
+    'Compatible Model': ['Universal'],
+    'Color': ['Black'],
+    'Country/Region of Manufacture': ['Unknown'],
   };
-  // Add condition-related aspects for used items
-  if (conditionId === '3000' || conditionId === '7000') {
-    aspects['Country/Region of Manufacture'] = ['United States'];
-  }
 
   const inventoryItem: Omit<EbayInventoryItem, 'sku'> = {
     product: {
