@@ -1,257 +1,323 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React from 'react';
 import {
   Badge,
   Banner,
   Card,
   Layout,
-  List,
   Page,
-  ResourceList,
+  Button,
+  ButtonGroup,
   Spinner,
   Text,
+  DataTable,
 } from '@shopify/polaris';
-
-type StatusResponse = {
-  status: string;
-  products: { mapped: number };
-  orders: { imported: number };
-  lastSyncs: Array<Record<string, unknown>>;
-  recentNotifications: LogEntry[];
-  settings: Record<string, string>;
-  uptime: number;
-};
-
-type LogEntry = {
-  id: number;
-  source: string;
-  topic: string;
-  status: string;
-  createdAt: string;
-  payload: string;
-};
-
-const formatDateTime = (value?: string | number | null) => {
-  if (!value) {
-    return '—';
-  }
-
-  if (typeof value === 'number') {
-    const ms = value > 1_000_000_000_000 ? value : value * 1000;
-    return new Date(ms).toLocaleString();
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toLocaleString();
-};
-
-const formatStatusBadge = (status?: string) => {
-  if (!status) {
-    return <Badge tone="info">Unknown</Badge>;
-  }
-
-  const normalized = status.toLowerCase();
-  if (normalized === 'running') {
-    return <Badge tone="success">Running</Badge>;
-  }
-  if (normalized === 'idle') {
-    return <Badge tone="warning">Idle</Badge>;
-  }
-  if (normalized === 'error' || normalized === 'failed') {
-    return <Badge tone="critical">Error</Badge>;
-  }
-
-  return <Badge tone="info">{status}</Badge>;
-};
+import { 
+  RefreshCw, 
+  Package, 
+  ShoppingCart, 
+  TrendingUp,
+  DollarSign,
+  AlertTriangle,
+  CheckCircle,
+  Zap,
+  BarChart3
+} from 'lucide-react';
+import { useStatus, useLogs, useSyncProducts, useSyncOrders, useSyncInventory } from '../hooks/useApi';
+import { useAppStore } from '../store';
+import StatusIndicator from '../components/StatusIndicator';
+import MetricCard from '../components/MetricCard';
 
 const Dashboard: React.FC = () => {
-  const [status, setStatus] = useState<StatusResponse | null>(null);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const { data: statusData, isLoading, error } = useStatus();
+  const status = statusData as any; // Cast to handle flexible API response
+  const { data: logsData } = useLogs(10);
+  const { notifications } = useAppStore();
+  
+  const syncProducts = useSyncProducts();
+  const syncOrders = useSyncOrders();
+  const syncInventory = useSyncInventory();
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const handleSyncProducts = () => syncProducts.mutate({});
+  const handleSyncOrders = () => syncOrders.mutate({});
+  const handleSyncInventory = () => syncInventory.mutate({});
 
-    try {
-      const [statusRes, logsRes] = await Promise.all([
-        fetch('/api/status'),
-        fetch('/api/logs?limit=5'),
-      ]);
+  // Format activity data for DataTable
+  const activityRows = logsData?.data?.slice(0, 5).map(log => [
+    log.topic,
+    log.source,
+    <Badge key={log.id} tone={log.status === 'success' ? 'success' : log.status === 'error' ? 'critical' : 'info'}>
+      {log.status}
+    </Badge>,
+    new Date(log.createdAt).toLocaleString(),
+  ]) || [];
 
-      if (!statusRes.ok) {
-        throw new Error('Failed to load status');
-      }
-
-      const statusJson = (await statusRes.json()) as StatusResponse;
-      setStatus(statusJson);
-
-      if (logsRes.ok) {
-        const logsJson = (await logsRes.json()) as { data: LogEntry[] };
-        setLogs(logsJson.data ?? []);
-      } else {
-        setLogs([]);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
-    } finally {
-      setLoading(false);
+  const formatDateTime = (value?: string | number | null) => {
+    if (!value) return '—';
+    if (typeof value === 'number') {
+      const ms = value > 1_000_000_000_000 ? value : value * 1000;
+      return new Date(ms).toLocaleString();
     }
-  }, []);
-
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
-
-  const handleSyncNow = async () => {
-    setSyncing(true);
-    setSyncMessage(null);
-
-    try {
-      const response = await fetch('/api/sync/trigger', { method: 'POST' });
-      if (!response.ok) {
-        throw new Error('Failed to trigger sync');
-      }
-      const result = (await response.json()) as { message?: string };
-      setSyncMessage(result.message ?? 'Sync triggered successfully');
-      void loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to trigger sync');
-    } finally {
-      setSyncing(false);
-    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleString();
   };
 
-  const settingsList = useMemo(() => {
-    if (!status?.settings) {
-      return [] as Array<[string, string]>;
-    }
-
-    return Object.entries(status.settings);
-  }, [status?.settings]);
+  if (error) {
+    return (
+      <Page title="Dashboard">
+        <Banner tone="critical" title="Failed to load dashboard">
+          <p>{error.message}</p>
+        </Banner>
+      </Page>
+    );
+  }
 
   return (
-    <Page
-      title="Dashboard"
-      primaryAction={{
-        content: 'Sync Now',
-        onAction: handleSyncNow,
-        loading: syncing,
-      }}
-    >
-      {error && (
-        <Banner tone="critical" title="Something went wrong">
-          <p>{error}</p>
+    <Page title="eBay Sync Dashboard">
+      {/* Notifications */}
+      {notifications.slice(0, 3).map((notification) => (
+        <Banner
+          key={notification.id}
+          tone={notification.type === 'error' ? 'critical' : notification.type === 'warning' ? 'warning' : 'success'}
+          title={notification.title}
+          onDismiss={() => {}}
+        >
+          {notification.message && <p>{notification.message}</p>}
         </Banner>
-      )}
-      {syncMessage && (
-        <Banner tone="success" title="Sync started">
-          <p>{syncMessage}</p>
-        </Banner>
-      )}
-      {loading && (
-        <Layout>
-          <Layout.Section>
-            <Card>
-              <Spinner accessibilityLabel="Loading dashboard" size="large" />
-            </Card>
-          </Layout.Section>
-        </Layout>
-      )}
-      {!loading && status && (
-        <Layout>
-          <Layout.Section>
-            <Layout>
-              <Layout.Section variant="oneThird">
-                <Card>
-                  <Text variant="headingSm" as="h3">
-                    Products Mapped
-                  </Text>
-                  <Text variant="headingLg" as="p">
-                    {status.products?.mapped ?? 0}
-                  </Text>
-                </Card>
-              </Layout.Section>
-              <Layout.Section variant="oneThird">
-                <Card>
-                  <Text variant="headingSm" as="h3">
-                    Orders Imported
-                  </Text>
-                  <Text variant="headingLg" as="p">
-                    {status.orders?.imported ?? 0}
-                  </Text>
-                </Card>
-              </Layout.Section>
-              <Layout.Section variant="oneThird">
-                <Card>
-                  <Text variant="headingSm" as="h3">
-                    Sync Status
-                  </Text>
-                  <Text variant="headingLg" as="p">
-                    {formatStatusBadge(status.status)}
-                  </Text>
-                </Card>
-              </Layout.Section>
-            </Layout>
-          </Layout.Section>
+      ))}
 
-          <Layout.Section variant="oneHalf">
-            <Card>
-              <Text variant="headingSm" as="h3">
-                Recent activity
+      <Layout>
+        {/* Hero Section - Sync Status */}
+        <Layout.Section>
+          <Card>
+            <div className="text-center py-8">
+              <div className="mb-4">
+                {isLoading ? (
+                  <Spinner size="large" />
+                ) : (
+                  <StatusIndicator
+                    type="sync"
+                    status={status?.status === 'running' ? 'syncing' : status?.status === 'error' ? 'error' : 'idle'}
+                    size="lg"
+                  />
+                )}
+              </div>
+              <Text variant="headingXl" as="h2">
+                {isLoading ? 'Loading...' : `System ${status?.status || 'Unknown'}`}
               </Text>
-              <ResourceList
-                resourceName={{ singular: 'notification', plural: 'notifications' }}
-                items={logs.slice(0, 5)}
-                renderItem={(item: LogEntry) => {
-                  return (
-                    <ResourceList.Item id={String(item.id)} onClick={() => {}}>
-                      <Text variant="bodyMd" as="p">
-                        {item.topic}
-                      </Text>
-                      <Text variant="bodySm" tone="subdued" as="p">
-                        {item.source} • {formatDateTime(item.createdAt)}
-                      </Text>
-                    </ResourceList.Item>
-                  );
-                }}
+              <Text variant="bodyLg" tone="subdued" as="p">
+                {status?.lastSyncs?.[0] ? 
+                  `Last sync: ${formatDateTime(status.lastSyncs[0].timestamp || status.lastSyncs[0].createdAt)}` : 
+                  'No recent sync activity'
+                }
+              </Text>
+              
+              <div className="mt-6 flex justify-center gap-4">
+                <ButtonGroup>
+                  <Button
+                    variant="primary"
+                    icon={<Package className="w-4 h-4" />}
+                    loading={syncProducts.isPending}
+                    onClick={handleSyncProducts}
+                  >
+                    Sync Products
+                  </Button>
+                  <Button
+                    icon={<ShoppingCart className="w-4 h-4" />}
+                    loading={syncOrders.isPending}
+                    onClick={handleSyncOrders}
+                  >
+                    Sync Orders
+                  </Button>
+                  <Button
+                    icon={<RefreshCw className="w-4 h-4" />}
+                    loading={syncInventory.isPending}
+                    onClick={handleSyncInventory}
+                  >
+                    Sync Inventory
+                  </Button>
+                </ButtonGroup>
+              </div>
+            </div>
+          </Card>
+        </Layout.Section>
+
+        {/* Metrics Grid */}
+        <Layout.Section>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
+            <MetricCard
+              title="Products Mapped"
+              value={status?.products?.mapped || 0}
+              icon={<Package className="w-5 h-5" />}
+              color="shopify"
+              loading={isLoading}
+              trend={{ value: 12, period: 'this week' }}
+            />
+            
+            <MetricCard
+              title="Orders Imported"
+              value={status?.orders?.imported || 0}
+              icon={<ShoppingCart className="w-5 h-5" />}
+              color="ebay"
+              loading={isLoading}
+              trend={{ value: 8, period: 'this week' }}
+            />
+            
+            <MetricCard
+              title="Inventory Synced"
+              value={status?.inventory?.synced || 0}
+              icon={<CheckCircle className="w-5 h-5" />}
+              color="success"
+              loading={isLoading}
+              trend={{ value: -2, period: 'today' }}
+            />
+            
+            <MetricCard
+              title="Pending Sync"
+              value={status?.products?.pending || status?.orders?.pending || 0}
+              icon={<AlertTriangle className="w-5 h-5" />}
+              color="warning"
+              loading={isLoading}
+            />
+            
+            <MetricCard
+              title="Failed Items"
+              value={status?.products?.failed || 0}
+              icon={<Zap className="w-5 h-5" />}
+              color="error"
+              loading={isLoading}
+            />
+            
+            <MetricCard
+              title="Revenue Today"
+              value={`$${(status?.revenue?.today || 0).toLocaleString()}`}
+              icon={<DollarSign className="w-5 h-5" />}
+              color="success"
+              loading={isLoading}
+              trend={{ value: 15, period: 'vs yesterday' }}
+            />
+          </div>
+        </Layout.Section>
+
+        {/* Connection Status */}
+        <Layout.Section variant="oneHalf">
+          <Card>
+            <Text variant="headingMd" as="h3">
+              Platform Connections
+            </Text>
+            <div className="space-y-4 mt-4">
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-shopify-500 rounded-full flex items-center justify-center">
+                    <div className="w-4 h-4 bg-white rounded-sm"></div>
+                  </div>
+                  <span className="font-medium">Shopify</span>
+                </div>
+                <StatusIndicator
+                  type="connection"
+                  status={status?.shopifyConnected ? 'connected' : 'disconnected'}
+                  platform="shopify"
+                  size="sm"
+                />
+              </div>
+              
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-ebay-500 rounded-full flex items-center justify-center">
+                    <div className="w-4 h-4 bg-white rounded-sm"></div>
+                  </div>
+                  <span className="font-medium">eBay</span>
+                </div>
+                <StatusIndicator
+                  type="connection"
+                  status={status?.ebayConnected ? 'connected' : 'disconnected'}
+                  platform="ebay"
+                  size="sm"
+                />
+              </div>
+            </div>
+          </Card>
+        </Layout.Section>
+
+        {/* Recent Activity */}
+        <Layout.Section variant="oneHalf">
+          <Card>
+            <div className="flex items-center justify-between mb-4">
+              <Text variant="headingMd" as="h3">
+                Recent Activity
+              </Text>
+              <Button
+                icon={<BarChart3 className="w-4 h-4" />}
+                variant="plain"
+                onClick={() => {/* Navigate to full logs */}}
+              >
+                View All
+              </Button>
+            </div>
+            
+            {logsData?.data && logsData.data.length > 0 ? (
+              <DataTable
+                columnContentTypes={['text', 'text', 'text', 'text']}
+                headings={['Action', 'Source', 'Status', 'Time']}
+                rows={activityRows}
+                truncate
               />
-            </Card>
-          </Layout.Section>
-
-          <Layout.Section variant="oneHalf">
-            <Card>
-              <Text variant="headingSm" as="h3">
-                Current settings
-              </Text>
-              {settingsList.length === 0 ? (
-                <Text tone="subdued" as="p">
-                  No settings found.
+            ) : (
+              <div className="text-center py-8 text-gray-500">
+                <Text variant="bodyLg" as="p">
+                  No recent activity
                 </Text>
-              ) : (
-                <List>
-                  {settingsList.map(([key, value]: [string, string]) => (
-                    <List.Item key={key}>
-                      <Text as="span" variant="bodyMd" fontWeight="medium">
-                        {key}
-                      </Text>{' '}
-                      <Text as="span" variant="bodyMd">
-                        {String(value)}
-                      </Text>
-                    </List.Item>
-                  ))}
-                </List>
-              )}
-            </Card>
-          </Layout.Section>
-        </Layout>
-      )}
+              </div>
+            )}
+          </Card>
+        </Layout.Section>
+
+        {/* System Information */}
+        <Layout.Section>
+          <Card>
+            <Text variant="headingMd" as="h3">
+              System Information
+            </Text>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+              <div className="text-center">
+                <Text variant="headingSm" as="h4">
+                  Uptime
+                </Text>
+                <Text variant="bodyLg" as="p">
+                  {status?.uptime ? Math.floor(status.uptime / 3600) : 0}h
+                </Text>
+              </div>
+              
+              <div className="text-center">
+                <Text variant="headingSm" as="h4">
+                  Version
+                </Text>
+                <Text variant="bodyLg" as="p">
+                  v0.2.0
+                </Text>
+              </div>
+              
+              <div className="text-center">
+                <Text variant="headingSm" as="h4">
+                  API Status
+                </Text>
+                <Text variant="bodyLg" as="p">
+                  Online
+                </Text>
+              </div>
+              
+              <div className="text-center">
+                <Text variant="headingSm" as="h4">
+                  Last Restart
+                </Text>
+                <Text variant="bodyLg" as="p">
+                  {formatDateTime(Date.now() - (status?.uptime || 0) * 1000)}
+                </Text>
+              </div>
+            </div>
+          </Card>
+        </Layout.Section>
+      </Layout>
     </Page>
   );
 };
