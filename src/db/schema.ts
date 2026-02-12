@@ -7,6 +7,9 @@ export const productMappings = sqliteTable('product_mappings', {
   ebayInventoryItemId: text('ebay_inventory_item_id'),
   status: text('status').default('active'),
   originalPrice: real('original_price'),               // Track original price for price drops
+  shopifyTitle: text('shopify_title'),                 // Cached Shopify product title
+  shopifyPrice: real('shopify_price'),                 // Cached Shopify price
+  shopifySku: text('shopify_sku'),                     // Cached Shopify SKU
   lastRepublishedAt: integer('last_republished_at', { mode: 'timestamp' }),
   promotedAt: integer('promoted_at', { mode: 'timestamp' }),
   adRate: real('ad_rate'),                              // Promoted listings ad rate %

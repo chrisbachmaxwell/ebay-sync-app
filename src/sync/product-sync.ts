@@ -309,7 +309,7 @@ const syncProductToEbay = async (
     const listingId = publishResponse.listingId;
     info(`Published eBay listing: ${listingId}`);
     
-    // Save mapping
+    // Save mapping (with cached Shopify metadata for list view)
     await db
       .insert(productMappings)
       .values({
@@ -317,6 +317,9 @@ const syncProductToEbay = async (
         ebayListingId: listingId,
         ebayInventoryItemId: variant.sku,
         status: 'active',
+        shopifyTitle: product.title || null,
+        shopifyPrice: parseFloat(variant.price) || null,
+        shopifySku: variant.sku || null,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -561,10 +564,15 @@ export const updateProductOnEbay = async (
       })
       .run();
     
-    // Update mapping timestamp
+    // Update mapping timestamp and cached Shopify metadata
     await db
       .update(productMappings)
-      .set({ updatedAt: new Date() })
+      .set({
+        updatedAt: new Date(),
+        shopifyTitle: product.title || undefined,
+        shopifyPrice: parseFloat(variant.price) || undefined,
+        shopifySku: variant.sku || undefined,
+      })
       .where(eq(productMappings.shopifyProductId, productId))
       .run();
     

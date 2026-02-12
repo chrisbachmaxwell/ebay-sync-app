@@ -19,7 +19,7 @@ import {
   TextField,
   Thumbnail,
 } from '@shopify/polaris';
-import { ExternalLink, RefreshCw, RotateCw, Search, XCircle } from 'lucide-react';
+import { ExternalLink, RotateCw, Search, XCircle } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiClient, useListings, useMappings, useProductOverrides, useSaveProductOverrides, useSyncProducts } from '../hooks/useApi';
@@ -68,7 +68,7 @@ const normalizeListing = (listing: any): ListingRecord => {
     ebayListingId: listing.ebayListingId ?? listing.ebay_listing_id ?? listing.ebayItemId ?? null,
     ebayInventoryItemId: listing.ebayInventoryItemId ?? listing.ebay_inventory_item_id ?? null,
     status: listing.status ?? 'inactive',
-    originalPrice: listing.originalPrice ?? listing.original_price ?? listing.price ?? null,
+    originalPrice: listing.originalPrice ?? listing.original_price ?? listing.shopifyPrice ?? listing.shopify_price ?? listing.price ?? null,
     lastRepublishedAt: listing.lastRepublishedAt ?? listing.last_republished_at ?? null,
     promotedAt: listing.promotedAt ?? listing.promoted_at ?? null,
     adRate: listing.adRate ?? listing.ad_rate ?? null,
@@ -609,24 +609,14 @@ const Listings: React.FC = () => {
         </IndexTable.Cell>
         <IndexTable.Cell>
           <div onClick={(event) => event.stopPropagation()}>
-            <ButtonGroup>
-              <Button
-                size="micro"
-                icon={<RefreshCw className="w-3 h-3" />}
-                onClick={() => syncProducts.mutate([listing.shopifyProductId])}
-                loading={syncProducts.isPending}
-              >
-                Sync
-              </Button>
-              <Button
-                size="micro"
-                icon={<ExternalLink className="w-3 h-3" />}
-                onClick={() => listing.ebayListingId && window.open(`https://www.ebay.com/itm/${listing.ebayListingId}`, '_blank')}
-                disabled={!listing.ebayListingId}
-              >
-                View
-              </Button>
-            </ButtonGroup>
+            <Button
+              size="micro"
+              icon={<ExternalLink className="w-3 h-3" />}
+              onClick={() => listing.ebayListingId && window.open(`https://www.ebay.com/itm/${listing.ebayListingId}`, '_blank')}
+              disabled={!listing.ebayListingId}
+            >
+              View
+            </Button>
           </div>
         </IndexTable.Cell>
       </IndexTable.Row>
@@ -709,13 +699,6 @@ const Listings: React.FC = () => {
                   <InlineStack align="space-between" gap="300">
                     <Text variant="bodyMd" as="p">{selectedItems.length} selected</Text>
                     <ButtonGroup>
-                      <Button
-                        icon={<RefreshCw className="w-4 h-4" />}
-                        onClick={() => syncProducts.mutate(selectedItems)}
-                        loading={syncProducts.isPending}
-                      >
-                        Bulk sync
-                      </Button>
                       <Button
                         icon={<RotateCw className="w-4 h-4" />}
                         onClick={() => bulkRelistMutation.mutate(selectedItems)}

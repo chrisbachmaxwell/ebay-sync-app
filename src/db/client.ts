@@ -27,6 +27,9 @@ const initTables = (sqlite: InstanceType<typeof Database>) => {
       ebay_inventory_item_id TEXT,
       status TEXT DEFAULT 'active',
       original_price REAL,
+      shopify_title TEXT,
+      shopify_price REAL,
+      shopify_sku TEXT,
       last_republished_at INTEGER,
       promoted_at INTEGER,
       ad_rate REAL,
@@ -194,6 +197,9 @@ const migrateProductMappings = (sqlite: InstanceType<typeof Database>) => {
     ['last_republished_at', 'ALTER TABLE product_mappings ADD COLUMN last_republished_at INTEGER'],
     ['promoted_at', 'ALTER TABLE product_mappings ADD COLUMN promoted_at INTEGER'],
     ['ad_rate', 'ALTER TABLE product_mappings ADD COLUMN ad_rate REAL'],
+    ['shopify_title', 'ALTER TABLE product_mappings ADD COLUMN shopify_title TEXT'],
+    ['shopify_price', 'ALTER TABLE product_mappings ADD COLUMN shopify_price REAL'],
+    ['shopify_sku', 'ALTER TABLE product_mappings ADD COLUMN shopify_sku TEXT'],
   ];
 
   for (const [colName, sql] of migrations) {

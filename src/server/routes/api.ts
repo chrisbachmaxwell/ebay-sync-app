@@ -29,17 +29,44 @@ router.get('/api/status', async (_req: Request, res: Response) => {
   }
 });
 
-/** GET /api/listings — Paginated product listings with eBay status */
+/** GET /api/listings — Paginated product listings with eBay status, filtering & search */
 router.get('/api/listings', async (req: Request, res: Response) => {
   try {
     const db = await getRawDb();
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
     const offset = parseInt(req.query.offset as string) || 0;
+    const search = (req.query.search as string || '').trim();
+    const statusParam = (req.query.status as string || '').trim();
 
-    const listings = db.prepare(`SELECT * FROM product_mappings ORDER BY id DESC LIMIT ? OFFSET ?`).all(limit, offset);
-    const total = db.prepare(`SELECT COUNT(*) as count FROM product_mappings`).get() as any;
+    const conditions: string[] = [];
+    const params: any[] = [];
 
-    res.json({ data: listings, total: total?.count ?? 0, limit, offset });
+    // Status filter: accept comma-separated values → WHERE status IN (...)
+    if (statusParam) {
+      const statuses = statusParam.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      if (statuses.length > 0) {
+        conditions.push(`status IN (${statuses.map(() => '?').join(',')})`);
+        params.push(...statuses);
+      }
+    }
+
+    // Search filter: match against title, SKU, shopify product ID, or eBay listing ID
+    if (search) {
+      conditions.push(
+        `(shopify_title LIKE ? OR shopify_sku LIKE ? OR shopify_product_id LIKE ? OR ebay_listing_id LIKE ?)`
+      );
+      const like = `%${search}%`;
+      params.push(like, like, like, like);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const countRow = db.prepare(`SELECT COUNT(*) as count FROM product_mappings ${whereClause}`).get(...params) as any;
+    const listings = db.prepare(
+      `SELECT * FROM product_mappings ${whereClause} ORDER BY id DESC LIMIT ? OFFSET ?`
+    ).all(...params, limit, offset);
+
+    res.json({ data: listings, total: countRow?.count ?? 0, limit, offset });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch listings', detail: String(err) });
   }
