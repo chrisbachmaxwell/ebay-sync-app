@@ -89,13 +89,23 @@ const mapShopifyProductToEbay = async (
   // Get condition description
   const conditionDesc = await getConditionDescription(conditionId, shopifyProduct);
 
+  // Determine brand and MPN
+  const brand = shopifyProduct.vendor || 'Unbranded';
+  // Try to extract MPN from SKU (strip condition suffix like -U123)
+  const rawSku = variant.sku || '';
+  const mpn = rawSku.replace(/-U\d+$/, '') || 'Does Not Apply';
+  
+  // Handle UPC — eBay rejects all-zeros, use 'Does Not Apply' instead
+  const effectiveUpc = upc && upc !== '0000000000000' && upc !== '000000000000' ? upc : undefined;
+
   const inventoryItem: Omit<EbayInventoryItem, 'sku'> = {
     product: {
       title: cleanTitle(title),
       description: finalDescription,
       imageUrls,
-      brand: shopifyProduct.vendor || undefined,
-      upc: upc ? [upc] : undefined, // eBay expects UPC as array
+      brand,
+      mpn,
+      upc: effectiveUpc ? [effectiveUpc] : ['Does Not Apply'],
     },
     condition: mapConditionIdToText(conditionId),
     conditionDescription: conditionDesc,
