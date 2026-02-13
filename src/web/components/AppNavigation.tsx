@@ -137,6 +137,25 @@ const AppNavigation: React.FC = () => {
               },
             ],
           },
+          {
+            label: 'Feature Requests',
+            icon: undefined,
+            selected: isSelected('/features') || isSelected('/features/admin'),
+            onClick: () => navigate('/features'),
+            url: '/features',
+            subNavigationItems: [
+              {
+                label: 'Requests',
+                url: '/features',
+                onClick: () => navigate('/features'),
+              },
+              {
+                label: 'Admin',
+                url: '/features/admin',
+                onClick: () => navigate('/features/admin'),
+              },
+            ],
+          },
         ]}
       />
     </Navigation>

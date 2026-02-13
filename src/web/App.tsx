@@ -13,6 +13,8 @@ import ImageProcessor from './pages/ImageProcessor';
 import Pipeline from './pages/Pipeline';
 import Help from './pages/Help';
 import HelpAdmin from './pages/HelpAdmin';
+import FeatureRequests from './pages/FeatureRequests';
+import FeatureAdmin from './pages/FeatureAdmin';
 import AppNavigation from './components/AppNavigation';
 import ChatWidget from './components/ChatWidget';
 import { useAppStore } from './store';
@@ -62,6 +64,8 @@ const AppFrame: React.FC = () => {
         <Route path="/logs" element={<Analytics />} />
         <Route path="/help" element={<Help />} />
         <Route path="/help/admin" element={<HelpAdmin />} />
+        <Route path="/features" element={<FeatureRequests />} />
+        <Route path="/features/admin" element={<FeatureAdmin />} />
       </Routes>
 
       <ChatWidget />

@@ -1,8 +1,95 @@
 import { Router, type Request, type Response } from 'express';
 import { getRawDb } from '../../db/client.js';
-import { info } from '../../utils/logger.js';
+import { info, error as logError } from '../../utils/logger.js';
+import { getCapabilities } from '../capabilities.js';
 
 const router = Router();
+
+/**
+ * Generate an AI answer for a help question using OpenAI.
+ * Returns the answer string, or null if OPENAI_API_KEY is not set or on error.
+ */
+async function generateAIAnswer(question: string): Promise<string | null> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    info('[Help] OPENAI_API_KEY not set — skipping AI auto-answer');
+    return null;
+  }
+
+  try {
+    const capabilities = getCapabilities();
+    const capList = capabilities
+      .map((c) => `- **${c.name}** (${c.category}): ${c.description}\n  Endpoints: ${c.apiEndpoints.join(', ')}`)
+      .join('\n');
+
+    const systemPrompt = `You are the help assistant for ProductBridge, a Shopify ↔ eBay listing automation app built for Pictureline, a camera store in Salt Lake City, Utah.
+
+Your job is to answer user questions about the app clearly and helpfully. Be professional but friendly. Use step-by-step instructions when appropriate.
+
+## App Purpose
+ProductBridge syncs products from Shopify to eBay, manages listings, processes images, handles orders, and automates the listing pipeline. It's designed specifically for a used camera gear business.
+
+## App Capabilities
+${capList}
+
+## Common Workflows
+1. **Sync Products**: Go to Products page → select items → click Sync to eBay. Products are mapped with field mappings.
+2. **Manage Listings**: Use the Listings page to browse, search, and filter active eBay listings.
+3. **Auto-Listing Pipeline**: New Shopify products flow through stages: pending → enriched (AI titles/descriptions) → images processed → listed on eBay.
+4. **Field Mappings**: Configure how Shopify fields map to eBay fields across 4 categories: Sales, Listing, Shipping, Payment.
+5. **Image Processing**: Images are processed through PhotoRoom for background removal and enhancement before listing.
+6. **Orders**: eBay orders are synced to Shopify for unified fulfillment (with date-filter safety guards).
+7. **Per-Product Overrides**: Customize individual product settings that differ from global mappings.
+8. **Price Drops & Republishing**: Stale listings can be automatically republished or have prices dropped.
+9. **Feature Requests**: Users can submit feature requests at /features to suggest improvements.
+
+## Guidelines
+- Answer in 2-5 paragraphs
+- Use clear, step-by-step instructions when explaining how to do something
+- Reference specific pages and navigation paths in the app
+- Be accurate — only describe features that exist in the capabilities list
+- If unsure about something, say so honestly`;
+
+    // Use fetch directly to call OpenAI API (avoid importing the full SDK at runtime)
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: question },
+        ],
+        temperature: 0.7,
+        max_tokens: 1000,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      logError(`[Help] OpenAI API error: ${response.status} ${errText}`);
+      return null;
+    }
+
+    const data = (await response.json()) as {
+      choices: Array<{ message: { content: string } }>;
+    };
+
+    const answer = data.choices?.[0]?.message?.content?.trim();
+    if (answer) {
+      info(`[Help] AI auto-answer generated (${answer.length} chars)`);
+      return answer;
+    }
+
+    return null;
+  } catch (err) {
+    logError(`[Help] AI auto-answer error: ${err}`);
+    return null;
+  }
+}
 
 /** POST /api/help/questions — Submit a new question */
 router.post('/api/help/questions', async (req: Request, res: Response) => {
@@ -21,7 +108,19 @@ router.post('/api/help/questions', async (req: Request, res: Response) => {
 
     info(`[Help] New question submitted: "${question.trim().slice(0, 60)}..."`);
 
-    const created = db.prepare(`SELECT * FROM help_questions WHERE id = ?`).get(result.lastInsertRowid);
+    // Attempt AI auto-answer (non-blocking for the response — we update in-place)
+    const questionId = result.lastInsertRowid;
+
+    // Generate AI answer and update the row
+    const aiAnswer = await generateAIAnswer(question.trim());
+    if (aiAnswer) {
+      db.prepare(
+        `UPDATE help_questions SET answer = ?, status = 'answered', answered_by = 'AI', updated_at = datetime('now') WHERE id = ?`
+      ).run(aiAnswer, questionId);
+      info(`[Help] Question ${questionId} auto-answered by AI`);
+    }
+
+    const created = db.prepare(`SELECT * FROM help_questions WHERE id = ?`).get(questionId);
     res.status(201).json({ ok: true, question: created });
   } catch (err) {
     res.status(500).json({ error: 'Failed to submit question', detail: String(err) });

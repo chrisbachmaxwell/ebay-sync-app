@@ -222,6 +222,16 @@ registerCapability({
 });
 
 registerCapability({
+  id: 'feature-requests',
+  name: 'Feature Requests',
+  description: 'Submit, browse, and manage feature requests. Users can suggest improvements and track their status.',
+  category: 'settings',
+  examplePrompts: ['submit a feature request', 'show feature requests', 'what features are planned'],
+  apiEndpoints: ['GET /api/features', 'POST /api/features', 'PUT /api/features/:id', 'DELETE /api/features/:id'],
+  addedAt: '2026-02-12',
+});
+
+registerCapability({
   id: 'status',
   name: 'System Status',
   description: 'Quick overview of connections, product counts, order counts, and uptime.',
