@@ -904,21 +904,28 @@ router.post('/api/test/create-product', async (req: Request, res: Response) => {
     const title = (req.body.title as string) || 'Camera Cleaning Kit - Basic';
     const price = (req.body.price as string) || '19.99';
     const inventory = parseInt(req.body.inventory as string) || 3;
+    const sku = (req.body.sku as string) || `TEST-${Date.now()}`;
+    const bodyHtml = (req.body.body_html as string) || `<p>Basic camera cleaning kit. Includes lens cloth, blower, and brush.</p>`;
+    const vendor = (req.body.vendor as string) || 'Pictureline';
+    const productType = (req.body.product_type as string) || 'Accessories';
+    const tags = (req.body.tags as string) || 'test,ebay-sync-test,Used';
+    const images = (req.body.images as Array<{ src: string }>) || [];
 
     const product = {
       product: {
         title,
-        body_html: `<p>Basic camera cleaning kit. Includes lens cloth, blower, and brush.</p>`,
-        vendor: 'Pictureline',
-        product_type: 'Accessories',
-        tags: 'test,ebay-sync-test,Used',
+        body_html: bodyHtml,
+        vendor,
+        product_type: productType,
+        tags,
         variants: [{
           price,
-          sku: `TEST-${Date.now()}`,
+          sku,
           inventory_management: 'shopify',
           inventory_quantity: inventory,
           barcode: '0000000000000',
         }],
+        images: images.length > 0 ? images : undefined,
         status: 'active',
       },
     };
@@ -991,6 +998,39 @@ router.post('/api/test/add-image', async (req: Request, res: Response) => {
     const data = await response.json() as any;
     info(`[API] Image added to product ${productId}: ${data.image?.id}`);
     res.json({ ok: true, image: data.image });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', detail: String(err) });
+  }
+});
+
+/** DELETE /api/test/delete-product — Delete a product from Shopify + local DB */
+router.delete('/api/test/delete-product', async (req: Request, res: Response) => {
+  try {
+    const db = await getRawDb();
+    const tokenRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`).get() as any;
+    if (!tokenRow?.access_token) { res.status(400).json({ error: 'No Shopify token' }); return; }
+
+    const productId = (req.query.productId || req.body?.productId) as string;
+    if (!productId) { res.status(400).json({ error: 'productId required' }); return; }
+
+    // Delete from Shopify
+    const response = await fetch(
+      `https://usedcameragear.myshopify.com/admin/api/2024-01/products/${productId}.json`,
+      { method: 'DELETE', headers: { 'X-Shopify-Access-Token': tokenRow.access_token } },
+    );
+
+    if (!response.ok) {
+      const errText = await response.text();
+      res.status(500).json({ error: 'Failed to delete from Shopify', detail: errText });
+      return;
+    }
+
+    // Clean up local DB records
+    db.prepare(`DELETE FROM product_listings WHERE shopify_product_id = ?`).run(productId);
+    db.prepare(`DELETE FROM sync_log WHERE entity_id = ?`).run(productId);
+
+    info(`[API] Product ${productId} deleted from Shopify + local DB`);
+    res.json({ ok: true, deleted: productId });
   } catch (err) {
     res.status(500).json({ error: 'Failed', detail: String(err) });
   }

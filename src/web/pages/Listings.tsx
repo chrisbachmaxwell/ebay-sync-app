@@ -390,7 +390,7 @@ const ListingDetail: React.FC = () => {
                   </Button>
                   <Button
                     icon={<ExternalLink className="w-4 h-4" />}
-                    onClick={() => listing.ebayListingId && window.open(`https://www.ebay.com/sh/lst/active`, '_blank')}
+                    onClick={() => listing.ebayListingId && window.open(`https://www.ebay.com/sh/lst/edit/${listing.ebayListingId}`, '_blank')}
                     disabled={!listing.ebayListingId}
                   >
                     Edit on eBay
