@@ -16,10 +16,16 @@ router.get('/api/status', async (_req: Request, res: Response) => {
     const recentNotifications = db.prepare(`SELECT * FROM notification_log ORDER BY id DESC LIMIT 10`).all();
     const settings = db.prepare(`SELECT * FROM settings`).all() as any[];
 
+    // Check auth token status
+    const shopifyToken = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`).get() as any;
+    const ebayToken = db.prepare(`SELECT access_token, expires_at FROM auth_tokens WHERE platform = 'ebay'`).get() as any;
+
     res.json({
       status: 'running',
       products: { mapped: productCount?.count ?? 0 },
       orders: { imported: orderCount?.count ?? 0 },
+      shopifyConnected: !!shopifyToken?.access_token,
+      ebayConnected: !!ebayToken?.access_token,
       lastSyncs,
       recentNotifications,
       settings: Object.fromEntries(settings.map((s) => [s.key, s.value])),
