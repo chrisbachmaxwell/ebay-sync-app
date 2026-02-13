@@ -957,9 +957,19 @@ router.post('/api/test/add-image', async (req: Request, res: Response) => {
 
     const productId = req.body.productId as string;
     const imageUrl = req.body.imageUrl as string;
-    if (!productId || !imageUrl) {
-      res.status(400).json({ error: 'productId and imageUrl required' });
+    const attachment = req.body.attachment as string; // base64 encoded image
+    const filename = req.body.filename as string;
+    if (!productId || (!imageUrl && !attachment)) {
+      res.status(400).json({ error: 'productId and (imageUrl or attachment) required' });
       return;
+    }
+
+    const imagePayload: Record<string, string> = {};
+    if (attachment) {
+      imagePayload.attachment = attachment;
+      if (filename) imagePayload.filename = filename;
+    } else {
+      imagePayload.src = imageUrl;
     }
 
     const response = await fetch(`https://usedcameragear.myshopify.com/admin/api/2024-01/products/${productId}/images.json`, {
@@ -968,7 +978,7 @@ router.post('/api/test/add-image', async (req: Request, res: Response) => {
         'X-Shopify-Access-Token': tokenRow.access_token,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ image: { src: imageUrl } }),
+      body: JSON.stringify({ image: imagePayload }),
     });
 
     if (!response.ok) {
