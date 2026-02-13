@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { getRawDb } from '../../db/client.js';
+import { getValidEbayToken } from '../../ebay/token-manager.js';
 import { info } from '../../utils/logger.js';
 
 const router = Router();
@@ -153,10 +154,10 @@ router.post('/api/sync/products', async (req: Request, res: Response) => {
     }
     
     // Get tokens
-    const ebayRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'ebay'`).get() as any;
+    const ebayToken = await getValidEbayToken();
     const shopifyRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`).get() as any;
     
-    if (!ebayRow?.access_token) {
+    if (!ebayToken) {
       res.status(400).json({ error: 'eBay token not found. Complete OAuth first.' });
       return;
     }
@@ -177,7 +178,7 @@ router.post('/api/sync/products', async (req: Request, res: Response) => {
     try {
       const { syncProducts } = await import('../../sync/product-sync.js');
       const result = await syncProducts(
-        ebayRow.access_token,
+        ebayToken,
         shopifyRow.access_token,
         productIds,
         settingsObj,
@@ -200,10 +201,10 @@ router.post('/api/sync/inventory', async (req: Request, res: Response) => {
     const dryRun = req.query.dry === 'true';
     
     // Get tokens
-    const ebayRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'ebay'`).get() as any;
+    const ebayToken = await getValidEbayToken();
     const shopifyRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`).get() as any;
     
-    if (!ebayRow?.access_token) {
+    if (!ebayToken) {
       res.status(400).json({ error: 'eBay token not found. Complete OAuth first.' });
       return;
     }
@@ -220,7 +221,7 @@ router.post('/api/sync/inventory', async (req: Request, res: Response) => {
     try {
       const { syncAllInventory } = await import('../../sync/inventory-sync.js');
       const result = await syncAllInventory(
-        ebayRow.access_token,
+        ebayToken,
         shopifyRow.access_token,
         { dryRun }
       );
@@ -241,10 +242,10 @@ router.post('/api/sync/prices', async (req: Request, res: Response) => {
     const dryRun = req.query.dry === 'true';
     
     // Get tokens
-    const ebayRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'ebay'`).get() as any;
+    const ebayToken = await getValidEbayToken();
     const shopifyRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`).get() as any;
     
-    if (!ebayRow?.access_token) {
+    if (!ebayToken) {
       res.status(400).json({ error: 'eBay token not found. Complete OAuth first.' });
       return;
     }
@@ -261,7 +262,7 @@ router.post('/api/sync/prices', async (req: Request, res: Response) => {
     try {
       const { syncPrices } = await import('../../sync/price-sync.js');
       const result = await syncPrices(
-        ebayRow.access_token,
+        ebayToken,
         shopifyRow.access_token,
         { dryRun }
       );
@@ -288,8 +289,8 @@ router.post('/api/sync/inventory/:sku', async (req: Request, res: Response) => {
     }
     
     // Get eBay token
-    const ebayRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'ebay'`).get() as any;
-    if (!ebayRow?.access_token) {
+    const ebayToken = await getValidEbayToken();
+    if (!ebayToken) {
       res.status(400).json({ error: 'eBay token not found.' });
       return;
     }
@@ -297,7 +298,7 @@ router.post('/api/sync/inventory/:sku', async (req: Request, res: Response) => {
     info(`[API] Single inventory sync: ${sku} → ${quantity}`);
     
     const { updateEbayInventory } = await import('../../sync/inventory-sync.js');
-    const result = await updateEbayInventory(ebayRow.access_token, sku, quantity);
+    const result = await updateEbayInventory(ebayToken, sku, quantity);
     
     res.json({ ok: result.success, sku, quantity, action: result.action, error: result.error });
     
@@ -487,8 +488,8 @@ router.get('/api/test/shopify-locations', async (_req: Request, res: Response) =
 router.get('/api/test/ebay-offer/:sku', async (req: Request, res: Response) => {
   try {
     const db = await getRawDb();
-    const ebayRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'ebay'`).get() as any;
-    if (!ebayRow?.access_token) {
+    const ebayToken = await getValidEbayToken();
+    if (!ebayToken) {
       res.status(400).json({ error: 'No eBay token' });
       return;
     }
@@ -498,8 +499,8 @@ router.get('/api/test/ebay-offer/:sku', async (req: Request, res: Response) => {
     const { getOffersBySku, getInventoryItem } = await import('../../ebay/inventory.js');
     
     const [offers, inventoryItem] = await Promise.all([
-      getOffersBySku(ebayRow.access_token, sku),
-      getInventoryItem(ebayRow.access_token, sku),
+      getOffersBySku(ebayToken, sku),
+      getInventoryItem(ebayToken, sku),
     ]);
     
     const offer = offers.offers?.[0];
@@ -532,10 +533,10 @@ router.put('/api/sync/products/:productId', async (req: Request, res: Response) 
     const db = await getRawDb();
     const productId = Array.isArray(req.params.productId) ? req.params.productId[0] : req.params.productId;
     
-    const ebayRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'ebay'`).get() as any;
+    const ebayToken = await getValidEbayToken();
     const shopifyRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`).get() as any;
     
-    if (!ebayRow?.access_token || !shopifyRow?.access_token) {
+    if (!ebayToken || !shopifyRow?.access_token) {
       res.status(400).json({ error: 'Missing eBay or Shopify token' });
       return;
     }
@@ -544,7 +545,7 @@ router.put('/api/sync/products/:productId', async (req: Request, res: Response) 
     const settingsObj = Object.fromEntries(settings.map((s) => [s.key, s.value]));
     
     const { updateProductOnEbay } = await import('../../sync/product-sync.js');
-    const result = await updateProductOnEbay(ebayRow.access_token, shopifyRow.access_token, productId, settingsObj);
+    const result = await updateProductOnEbay(ebayToken, shopifyRow.access_token, productId, settingsObj);
     
     res.json({ ok: result.success, productId, updated: result.updated, error: result.error });
   } catch (err) {
@@ -558,14 +559,14 @@ router.post('/api/sync/products/:productId/end', async (req: Request, res: Respo
     const db = await getRawDb();
     const productId = Array.isArray(req.params.productId) ? req.params.productId[0] : req.params.productId;
     
-    const ebayRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'ebay'`).get() as any;
-    if (!ebayRow?.access_token) {
+    const ebayToken = await getValidEbayToken();
+    if (!ebayToken) {
       res.status(400).json({ error: 'No eBay token' });
       return;
     }
     
     const { endEbayListing } = await import('../../sync/product-sync.js');
-    const result = await endEbayListing(ebayRow.access_token, productId);
+    const result = await endEbayListing(ebayToken, productId);
     
     res.json({ ok: result.success, productId, error: result.error });
   } catch (err) {
@@ -984,8 +985,8 @@ router.post('/api/listings/republish-stale', async (req: Request, res: Response)
     const db = await getRawDb();
     const maxAgeDays = parseInt(req.body.maxAgeDays as string) || 30;
 
-    const ebayRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'ebay'`).get() as any;
-    if (!ebayRow?.access_token) {
+    const ebayToken = await getValidEbayToken();
+    if (!ebayToken) {
       res.status(400).json({ error: 'eBay token not found. Complete OAuth first.' });
       return;
     }
@@ -996,7 +997,7 @@ router.post('/api/listings/republish-stale', async (req: Request, res: Response)
     // Run in background
     try {
       const { republishStaleListings } = await import('../../sync/listing-manager.js');
-      const result = await republishStaleListings(ebayRow.access_token, maxAgeDays);
+      const result = await republishStaleListings(ebayToken, maxAgeDays);
       info(`[API] Republish complete: ${result.republished} republished, ${result.skipped} skipped, ${result.failed} failed`);
     } catch (err) {
       info(`[API] Republish error: ${err}`);
@@ -1011,8 +1012,8 @@ router.post('/api/listings/apply-price-drops', async (req: Request, res: Respons
   try {
     const db = await getRawDb();
 
-    const ebayRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'ebay'`).get() as any;
-    if (!ebayRow?.access_token) {
+    const ebayToken = await getValidEbayToken();
+    if (!ebayToken) {
       res.status(400).json({ error: 'eBay token not found. Complete OAuth first.' });
       return;
     }
@@ -1023,7 +1024,7 @@ router.post('/api/listings/apply-price-drops', async (req: Request, res: Respons
     // Run in background
     try {
       const { applyPriceDropSchedule } = await import('../../sync/listing-manager.js');
-      const result = await applyPriceDropSchedule(ebayRow.access_token);
+      const result = await applyPriceDropSchedule(ebayToken);
       info(`[API] Price drops complete: ${result.dropped} dropped, ${result.skipped} skipped, ${result.failed} failed`);
     } catch (err) {
       info(`[API] Price drop error: ${err}`);
@@ -1069,8 +1070,8 @@ router.post('/api/listings/promote', async (req: Request, res: Response) => {
       return;
     }
 
-    const ebayRow = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'ebay'`).get() as any;
-    if (!ebayRow?.access_token) {
+    const ebayToken = await getValidEbayToken();
+    if (!ebayToken) {
       res.status(400).json({ error: 'eBay token not found. Complete OAuth first.' });
       return;
     }
@@ -1082,7 +1083,7 @@ router.post('/api/listings/promote', async (req: Request, res: Response) => {
     // Run in background
     try {
       const { enablePromotedListings } = await import('../../sync/listing-manager.js');
-      const result = await enablePromotedListings(ebayRow.access_token, listingIds, effectiveRate);
+      const result = await enablePromotedListings(ebayToken, listingIds, effectiveRate);
       info(`[API] Promote complete: ${result.promoted} promoted, ${result.failed} failed`);
     } catch (err) {
       info(`[API] Promote error: ${err}`);

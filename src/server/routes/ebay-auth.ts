@@ -185,4 +185,36 @@ router.delete('/ebay/auth', async (_req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /ebay/auth/refresh — Force-refresh the eBay token using stored refresh token
+ */
+router.post('/ebay/auth/refresh', async (_req: Request, res: Response) => {
+  try {
+    const { getValidEbayToken } = await import('../../ebay/token-manager.js');
+    const token = await getValidEbayToken();
+    if (!token) {
+      res.status(400).json({ ok: false, error: 'No token to refresh. Authorize first at /ebay/auth' });
+      return;
+    }
+
+    // Re-check status after refresh
+    const db = await getDb();
+    const row = await db
+      .select()
+      .from(authTokens)
+      .where(eq(authTokens.platform, 'ebay'))
+      .get();
+
+    info('[eBay Auth] Token refreshed successfully');
+    res.json({
+      ok: true,
+      message: 'eBay token refreshed',
+      expiresAt: row?.expiresAt?.toISOString() ?? null,
+    });
+  } catch (err) {
+    logError(`[eBay Auth] Refresh failed: ${err}`);
+    res.status(500).json({ ok: false, error: `Refresh failed: ${err instanceof Error ? err.message : err}` });
+  }
+});
+
 export default router;
