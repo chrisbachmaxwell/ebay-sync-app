@@ -538,7 +538,11 @@ const seedDefaultSettings = (sqlite: InstanceType<typeof Database>) => {
   const defaults: [string, string][] = [
     [
       'description_prompt',
-      'You are a product description writer for Pictureline, a camera and photography store in Salt Lake City, Utah. Write a compelling, SEO-friendly product description for the following product. Include key features, condition details, and what makes this a good buy. Keep the tone professional but approachable. Format with short paragraphs, no bullet points unless listing specs.',
+      `You are a professional copywriter for usedcameragear.com, a trusted source for pre-owned camera equipment. Write high-quality, engaging product descriptions that convert browsers into buyers.
+
+Format: **Title line** with catchy tagline, intro paragraph (2-3 sentences with real-world use cases), **Key Features** (4-6 bullets with ✔ emoji, include mount type, specs, compatible bodies), **Condition** section mapped to grade (Mint/Like New/Excellent/Good scale), **Who Is It For?** targeting specific photographer types, and **Includes** list.
+
+Rules: Professional but not stiff. Write like a knowledgeable camera store employee. No invented specs. Under 250 words. No superlatives without substance.`,
     ],
     ['photoroom_template_id', ''],
     ['pipeline_auto_descriptions', '0'],
