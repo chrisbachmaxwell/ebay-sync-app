@@ -12,6 +12,7 @@ import {
   Select,
   Spinner,
   Text,
+  TextField,
 } from '@shopify/polaris';
 import { LinkIcon, RefreshIcon } from '@shopify/polaris-icons';
 import { apiClient, useEbayAuthStatus, useSettings, useUpdateSettings } from '../hooks/useApi';
@@ -30,6 +31,10 @@ const Settings: React.FC = () => {
     sync_interval_minutes: settings?.sync_interval_minutes ?? '5',
     sync_inventory: settings?.sync_inventory ?? 'true',
     sync_price: settings?.sync_price ?? 'true',
+    description_prompt: settings?.description_prompt ?? '',
+    photoroom_template_id: settings?.photoroom_template_id ?? '',
+    pipeline_auto_descriptions: settings?.pipeline_auto_descriptions ?? '0',
+    pipeline_auto_images: settings?.pipeline_auto_images ?? '0',
     ...settings,
     ...draft,
   }), [settings, draft]);
@@ -78,6 +83,8 @@ const Settings: React.FC = () => {
     );
   }
 
+  const photoroomKeyConfigured = Boolean(settings?.photoroom_api_key_configured === 'true' || process.env.PHOTOROOM_API_KEY);
+
   return (
     <Page
       title="Settings"
@@ -89,6 +96,7 @@ const Settings: React.FC = () => {
       }}
     >
       <Layout>
+        {/* ── Sync Configuration ──────────────────────────────────── */}
         <Layout.Section>
           <Card>
             <BlockStack gap="400">
@@ -133,6 +141,78 @@ const Settings: React.FC = () => {
           </Card>
         </Layout.Section>
 
+        {/* ── Shopify — Description Prompt ─────────────────────────── */}
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <Text variant="headingMd" as="h2">Shopify</Text>
+              <Text tone="subdued" as="p">
+                Configure AI description generation for the auto-listing pipeline.
+              </Text>
+              <TextField
+                label="Description Generation Prompt"
+                value={String(mergedSettings.description_prompt)}
+                onChange={(value) => setDraft((prev) => ({ ...prev, description_prompt: value }))}
+                multiline={10}
+                autoComplete="off"
+                helpText="This prompt is sent to the AI when generating product descriptions for new listings."
+              />
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        {/* ── PhotoRoom ────────────────────────────────────────────── */}
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <Text variant="headingMd" as="h2">PhotoRoom</Text>
+              <Text tone="subdued" as="p">
+                Image processing settings for product photos.
+              </Text>
+              <TextField
+                label="Template ID"
+                value={String(mergedSettings.photoroom_template_id)}
+                onChange={(value) => setDraft((prev) => ({ ...prev, photoroom_template_id: value }))}
+                autoComplete="off"
+                helpText="The PhotoRoom template used to render product images."
+              />
+              <InlineStack gap="200" blockAlign="center">
+                <Text as="span" variant="bodyMd">API key status:</Text>
+                <Badge tone={photoroomKeyConfigured ? 'success' : 'critical'}>
+                  {photoroomKeyConfigured ? 'Configured' : 'Not configured'}
+                </Badge>
+              </InlineStack>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        {/* ── Pipeline ─────────────────────────────────────────────── */}
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <Text variant="headingMd" as="h2">Pipeline</Text>
+              <Text tone="subdued" as="p">
+                Control automatic processing for new products entering the pipeline.
+              </Text>
+              <Checkbox
+                label="Auto-generate descriptions on new products"
+                checked={String(mergedSettings.pipeline_auto_descriptions) === '1'}
+                onChange={(value) =>
+                  setDraft((prev) => ({ ...prev, pipeline_auto_descriptions: value ? '1' : '0' }))
+                }
+              />
+              <Checkbox
+                label="Auto-process images on new products"
+                checked={String(mergedSettings.pipeline_auto_images) === '1'}
+                onChange={(value) =>
+                  setDraft((prev) => ({ ...prev, pipeline_auto_images: value ? '1' : '0' }))
+                }
+              />
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        {/* ── Shopify Connection ────────────────────────────────────── */}
         <Layout.Section variant="oneHalf">
           <Card>
             <BlockStack gap="300">
@@ -152,6 +232,7 @@ const Settings: React.FC = () => {
           </Card>
         </Layout.Section>
 
+        {/* ── eBay Connection ──────────────────────────────────────── */}
         <Layout.Section variant="oneHalf">
           <Card>
             <BlockStack gap="300">

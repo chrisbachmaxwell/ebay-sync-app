@@ -232,6 +232,22 @@ registerCapability({
 });
 
 registerCapability({
+  id: 'description-prompt-settings',
+  name: 'Description Prompt Settings',
+  description:
+    'Configure the AI prompt template used to generate product descriptions in the auto-listing pipeline. Also manage PhotoRoom template, pipeline toggles, and other Shopify-related settings.',
+  category: 'settings',
+  examplePrompts: [
+    'update the description prompt',
+    'change AI prompt for listings',
+    'configure photoroom template',
+    'enable auto descriptions',
+  ],
+  apiEndpoints: ['GET /api/settings', 'PUT /api/settings'],
+  addedAt: '2026-02-12',
+});
+
+registerCapability({
   id: 'status',
   name: 'System Status',
   description: 'Quick overview of connections, product counts, order counts, and uptime.',
