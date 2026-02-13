@@ -68,7 +68,7 @@ app.use('/webhooks/shopify', express.raw({ type: 'application/json' }), (req, _r
 app.use('/webhooks/ebay', express.text({ type: ['text/xml', 'application/xml', 'application/soap+xml'] }));
 
 // JSON for everything else
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 // --- Security Middleware ---
 app.use(rateLimit);
