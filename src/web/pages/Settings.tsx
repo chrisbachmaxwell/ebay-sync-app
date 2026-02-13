@@ -59,7 +59,7 @@ const Settings: React.FC = () => {
 
   if (isLoading) {
     return (
-      <Page title="Settings">
+      <Page title="Settings" fullWidth>
         <Card>
           <Box padding="600">
             <InlineStack align="center">
@@ -73,7 +73,7 @@ const Settings: React.FC = () => {
 
   if (error) {
     return (
-      <Page title="Settings">
+      <Page title="Settings" fullWidth>
         <Card>
           <BlockStack gap="200">
             <Text variant="headingMd" as="h2">Settings unavailable</Text>
@@ -95,6 +95,7 @@ const Settings: React.FC = () => {
         onAction: handleSave,
         loading: updateSettings.isPending,
       }}
+      fullWidth
     >
       <Layout>
         {/* ── Sync Configuration ──────────────────────────────────── */}

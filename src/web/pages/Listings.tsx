@@ -309,6 +309,7 @@ const ListingDetail: React.FC = () => {
         loading: syncMutation.isPending,
       }}
       secondaryActions={secondaryActions}
+      fullWidth
     >
       {(listingLoading || productLoading) && (
         <div style={{ padding: '2rem', textAlign: 'center' }}>
@@ -667,6 +668,7 @@ const Listings: React.FC = () => {
         onAction: () => syncProducts.mutate([]),
         loading: syncProducts.isPending,
       }}
+      fullWidth
     >
       <Layout>
         <Layout.Section>

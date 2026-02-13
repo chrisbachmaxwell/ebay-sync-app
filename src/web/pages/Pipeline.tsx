@@ -318,7 +318,7 @@ const Pipeline: React.FC = () => {
   const failed = jobs.filter((j) => j.status === 'failed').length;
 
   return (
-    <Page title="Pipeline Overview" subtitle="Real-time product automation flow">
+    <Page title="Pipeline Overview" subtitle="Real-time product automation flow" fullWidth>
       <BlockStack gap="600">
         {/* Process Product trigger */}
         <Card>

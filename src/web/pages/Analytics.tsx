@@ -39,7 +39,7 @@ const Analytics: React.FC = () => {
 
   if (logsLoading || healthLoading) {
     return (
-      <Page title="Analytics" subtitle="Sync history and listing health">
+      <Page title="Analytics" subtitle="Sync history and listing health" fullWidth>
         <Card>
           <Box padding="600">
             <InlineStack align="center">
@@ -53,7 +53,7 @@ const Analytics: React.FC = () => {
 
   if (logsError || healthError) {
     return (
-      <Page title="Analytics" subtitle="Sync history and listing health">
+      <Page title="Analytics" subtitle="Sync history and listing health" fullWidth>
         <Card>
           <BlockStack gap="200">
             <Text variant="headingMd" as="h2">Analytics unavailable</Text>
@@ -65,7 +65,7 @@ const Analytics: React.FC = () => {
   }
 
   return (
-    <Page title="Analytics" subtitle="Sync history and listing health">
+    <Page title="Analytics" subtitle="Sync history and listing health" fullWidth>
       <Layout>
         <Layout.Section>
           <Card>

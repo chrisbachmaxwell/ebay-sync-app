@@ -2,14 +2,19 @@ import React, { useCallback, useState } from 'react';
 import {
   Banner,
   BlockStack,
+  Box,
   Button,
   Card,
+  Divider,
+  Icon,
+  InlineGrid,
   InlineStack,
   Page,
   Spinner,
   Text,
   TextField,
 } from '@shopify/polaris';
+import { ImageIcon, CheckCircleIcon, AlertCircleIcon } from '@shopify/polaris-icons';
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../hooks/useApi';
 
@@ -58,44 +63,79 @@ const ImageProcessor: React.FC = () => {
 
   if (statusLoading) {
     return (
-      <Page title="Image Processor">
+      <Page title="Image Processor" fullWidth>
         <Card>
-          <InlineStack align="center">
-            <Spinner size="small" />
-            <Text as="span" variant="bodyMd">
-              Checking PhotoRoom status…
-            </Text>
-          </InlineStack>
+          <Box padding="400">
+            <InlineStack align="center" gap="200">
+              <Spinner size="small" />
+              <Text as="span" variant="bodyMd">
+                Checking PhotoRoom status…
+              </Text>
+            </InlineStack>
+          </Box>
         </Card>
       </Page>
     );
   }
 
   return (
-    <Page title="Image Processor" subtitle="PhotoRoom background removal &amp; product image processing">
-      <BlockStack gap="400">
-        {/* Status card */}
+    <Page 
+      title="Image Processor" 
+      subtitle="PhotoRoom background removal & product image processing" 
+      fullWidth
+    >
+      <BlockStack gap="500">
+        
+        {/* ── Status Overview ── */}
+        <Card>
+          <InlineStack align="space-between" blockAlign="center">
+            <InlineStack gap="300" blockAlign="center">
+              <Box
+                background={status?.configured ? 'bg-fill-success-secondary' : 'bg-fill-warning-secondary'}
+                borderRadius="200"
+                padding="200"
+              >
+                <Icon
+                  source={status?.configured ? CheckCircleIcon : AlertCircleIcon}
+                  tone={status?.configured ? 'success' : 'warning'}
+                />
+              </Box>
+              <BlockStack gap="050">
+                <Text variant="headingSm" as="h2">
+                  PhotoRoom Integration
+                </Text>
+                <Text variant="bodySm" tone="subdued" as="p">
+                  {status?.configured 
+                    ? 'API configured and ready'
+                    : 'Setup required'}
+                </Text>
+              </BlockStack>
+            </InlineStack>
+          </InlineStack>
+        </Card>
+
+        {/* ── Configuration Status ── */}
         <Card>
           <BlockStack gap="300">
-            <Text as="h2" variant="headingMd">
-              PhotoRoom Integration
-            </Text>
+            <Text variant="headingMd" as="h2">Configuration</Text>
+            
+            <Divider />
 
             {status?.configured ? (
-              <Banner tone="success">
-                <Text as="span" variant="bodyMd">
-                  PhotoRoom API is configured and ready to use.
+              <Banner tone="success" title="PhotoRoom API Ready">
+                <Text as="p">
+                  PhotoRoom API is configured and ready to use for automatic image processing.
                 </Text>
               </Banner>
             ) : (
-              <Banner tone="warning">
+              <Banner tone="warning" title="Setup Required">
                 <BlockStack gap="200">
-                  <Text as="span" variant="bodyMd">
+                  <Text as="p">
                     PhotoRoom API is not configured. Set the{' '}
                     <code>PHOTOROOM_API_KEY</code> environment variable to
                     enable automatic image processing.
                   </Text>
-                  <Text as="span" variant="bodySm">
+                  <Text tone="subdued" as="p">
                     Get your API key at{' '}
                     <a
                       href="https://app.photoroom.com/api-dashboard"
@@ -111,80 +151,106 @@ const ImageProcessor: React.FC = () => {
           </BlockStack>
         </Card>
 
-        {/* Process images card */}
+        {/* ── Process Images Card ── */}
         {status?.configured && (
           <Card>
-            <BlockStack gap="300">
-              <Text as="h2" variant="headingMd">
-                Process Product Images
-              </Text>
-              <Text as="p" variant="bodyMd">
-                Enter a Shopify product ID to remove backgrounds, add a white
-                background with drop shadow, and generate clean product images.
-              </Text>
+            <BlockStack gap="400">
+              <InlineStack gap="300" blockAlign="center">
+                <Box background="bg-fill-secondary" borderRadius="200" padding="200">
+                  <Icon source={ImageIcon} />
+                </Box>
+                <BlockStack gap="050">
+                  <Text variant="headingMd" as="h2">Process Product Images</Text>
+                  <Text variant="bodySm" tone="subdued" as="p">
+                    Remove backgrounds, add white background with drop shadow, and generate clean product images
+                  </Text>
+                </BlockStack>
+              </InlineStack>
 
-              <TextField
-                label="Shopify Product ID"
-                value={productId}
-                onChange={setProductId}
-                placeholder="e.g. 8234567890123"
-                autoComplete="off"
-              />
+              <Divider />
 
-              <InlineStack align="start">
+              <InlineStack gap="300" align="space-between" wrap={false}>
+                <Box minWidth="300px">
+                  <TextField
+                    label=""
+                    value={productId}
+                    onChange={setProductId}
+                    placeholder="Enter Shopify Product ID (e.g. 8234567890123)"
+                    autoComplete="off"
+                  />
+                </Box>
                 <Button
                   variant="primary"
                   onClick={handleProcess}
                   loading={processing}
                   disabled={!productId.trim()}
                 >
-                  Process Images
+                  {processing ? 'Processing...' : 'Process Images'}
                 </Button>
               </InlineStack>
             </BlockStack>
           </Card>
         )}
 
-        {/* Error banner */}
+        {/* ── Error Banner ── */}
         {error && (
-          <Banner tone="critical" onDismiss={() => setError(null)}>
-            <Text as="span" variant="bodyMd">
-              {error}
-            </Text>
+          <Banner tone="critical" title="Processing Failed" onDismiss={() => setError(null)}>
+            <Text as="p">{error}</Text>
           </Banner>
         )}
 
-        {/* Results */}
+        {/* ── Results ── */}
         {result && (
           <Card>
-            <BlockStack gap="300">
-              <Text as="h2" variant="headingMd">
-                Processed Images ({result.processedCount}/{result.originalCount})
-              </Text>
+            <BlockStack gap="400">
+              <InlineStack align="space-between" blockAlign="center">
+                <BlockStack gap="050">
+                  <Text variant="headingMd" as="h2">
+                    Processing Complete
+                  </Text>
+                  <Text variant="bodySm" tone="subdued" as="p">
+                    {result.processedCount} of {result.originalCount} images processed successfully
+                  </Text>
+                </BlockStack>
+                <Box
+                  background="bg-fill-success-secondary"
+                  borderRadius="200"
+                  padding="200"
+                >
+                  <Icon source={CheckCircleIcon} tone="success" />
+                </Box>
+              </InlineStack>
 
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-                {result.images.map((src, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      border: '1px solid #ddd',
-                      borderRadius: '8px',
-                      padding: '8px',
-                      background: '#f9f9f9',
-                    }}
-                  >
-                    <img
-                      src={src}
-                      alt={`Processed ${idx + 1}`}
-                      style={{
-                        maxWidth: '240px',
-                        maxHeight: '240px',
-                        objectFit: 'contain',
-                      }}
-                    />
-                  </div>
-                ))}
-              </div>
+              <Divider />
+
+              {result.images.length === 0 ? (
+                <Box padding="400">
+                  <BlockStack gap="200" inlineAlign="center">
+                    <Icon source={ImageIcon} tone="subdued" />
+                    <Text tone="subdued" as="p">No processed images to display</Text>
+                  </BlockStack>
+                </Box>
+              ) : (
+                <InlineGrid columns={{ xs: 2, sm: 3, md: 4 }} gap="300">
+                  {result.images.map((src, idx) => (
+                    <Card key={idx}>
+                      <Box padding="200">
+                        <img
+                          src={src}
+                          alt={`Processed image ${idx + 1}`}
+                          style={{
+                            width: '100%',
+                            height: 'auto',
+                            maxHeight: '200px',
+                            objectFit: 'contain',
+                            borderRadius: '4px',
+                          }}
+                        />
+                      </Box>
+                    </Card>
+                  ))}
+                </InlineGrid>
+              )}
             </BlockStack>
           </Card>
         )}
