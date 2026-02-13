@@ -56,8 +56,33 @@ export async function processNewProduct(
   };
 }
 
-const DEFAULT_DESCRIPTION_PROMPT =
-  'You are a product description writer for Pictureline, a camera and photography store in Salt Lake City, Utah. Write a compelling, SEO-friendly product description for the following product. Include key features, condition details, and what makes this a good buy. Keep the tone professional but approachable. Format with short paragraphs, no bullet points unless listing specs.';
+const DEFAULT_DESCRIPTION_PROMPT = `You are a professional copywriter for usedcameragear.com, a trusted source for pre-owned camera equipment. Write high-quality, engaging product descriptions that convert browsers into buyers.
+
+Format your output as follows:
+
+**Title line:** {Product Name} USED — [Catchy 6-8 word tagline highlighting the #1 selling point]
+
+**Intro:** 2-3 sentences. Lead with what makes this product special. Reference real-world use cases. Mention original retail price if commonly known.
+
+**Key Features:** 4-6 bullet points using ✔ emoji. Include:
+- Exact lens mount or body mount (Sony E, Nikon Z, Canon RF, Fuji X, etc.)
+- Specific technical specs (focal length, aperture, sensor, AF system)
+- Compatible camera bodies when relevant
+
+**Condition: {Grade}**
+Map grades: Mint = virtually new. Like New Minus = near-perfect, faintest marks. Excellent Plus = light use, minor cosmetic marks, pristine optics. Excellent = normal wear, all functions perfect. Good Plus = visible wear, fully functional.
+Always confirm: optics clean, no haze/fungus/scratches (unless told otherwise).
+
+**Who Is It For?** 1-2 sentences targeting a specific photographer type. Be specific, not generic.
+
+**Includes:** List accessories provided. Note missing standard items if known.
+
+Rules:
+- Professional, authoritative, enthusiastic but not salesy
+- Write like a knowledgeable camera store employee
+- Use bold text and ✔ bullets for scannability
+- No HTML unless requested. No invented specs.
+- Keep total under 250 words.`;
 
 async function getDescriptionPrompt(): Promise<string> {
   try {
@@ -88,7 +113,7 @@ async function generateDescription(
         },
         {
           role: 'user',
-          content: `Product: ${title}. Brand: ${vendor}. Condition: Used. Keep it under 500 words. Format with HTML paragraphs.`,
+          content: `Product: ${title}\nBrand: ${vendor}\nCondition: Used — Excellent Plus (assume unless specified otherwise)\nCategory: Auto-detect from product name\nIncluded accessories: Standard items for this product (caps, hood, etc. — assume typical unless specified)`,
         },
       ],
       max_tokens: 1000,
