@@ -574,15 +574,152 @@ const migrateProductMappings = (sqlite: InstanceType<typeof Database>) => {
   }
 };
 
+/**
+ * Migrate help_questions table — add sort_order column if missing.
+ */
+const migrateHelpQuestions = (sqlite: InstanceType<typeof Database>) => {
+  const cols = sqlite.prepare(`PRAGMA table_info(help_questions)`).all() as any[];
+  const colNames = new Set(cols.map((c: any) => c.name));
+
+  if (!colNames.has('sort_order')) {
+    sqlite.exec('ALTER TABLE help_questions ADD COLUMN sort_order INTEGER DEFAULT 0');
+  }
+};
+
+/**
+ * Seed "Getting Started" articles and assign sort_order to all seed content.
+ */
+const seedGettingStartedContent = (sqlite: InstanceType<typeof Database>) => {
+  const insert = sqlite.prepare(`
+    INSERT OR IGNORE INTO help_questions (question, answer, status, answered_by, category, sort_order)
+    SELECT ?, ?, 'published', 'System', ?, ?
+    WHERE NOT EXISTS (SELECT 1 FROM help_questions WHERE question = ?)
+  `);
+
+  const entries: [string, string, string, number][] = [
+    [
+      'Welcome to ProductBridge',
+      `Welcome to ProductBridge — your all-in-one solution for syncing products between Shopify and eBay!
+
+ProductBridge was built specifically for Pictureline, a camera store in Salt Lake City, to automate the process of listing used camera gear on eBay from their Shopify inventory. Here's what you can do:
+
+**Sync Products** — Push your Shopify products to eBay with configurable field mappings that control how titles, descriptions, prices, and images translate between platforms.
+
+**Auto-Listing Pipeline** — New Shopify products can automatically flow through AI enrichment (optimized titles and descriptions), image processing (background removal via PhotoRoom), and get listed on eBay with zero manual work.
+
+**Manage Orders** — eBay orders sync back to Shopify for unified fulfillment. Safety guards ensure only recent orders are imported.
+
+**Smart Features** — Automatic price drops for slow-moving inventory, listing health monitoring, republishing stale listings, and a built-in AI chat assistant.
+
+Use the sidebar navigation to explore these docs, or check out the quick-start guide to get set up in minutes.`,
+      'Getting Started',
+      1,
+    ],
+    [
+      'Quick Start Guide',
+      `Get ProductBridge up and running in 5 steps:
+
+**Step 1 — Connect Shopify**
+Go to **Settings** and enter your Shopify store URL and API access token. The Dashboard will show your connection status.
+
+**Step 2 — Connect eBay**
+In **Settings**, click the eBay authentication button. You'll be redirected to eBay to authorize access. Once complete, your token refreshes automatically.
+
+**Step 3 — Review Field Mappings**
+Visit the **Mappings** page to see how Shopify fields map to eBay listing fields. The defaults work well for camera gear, but you can customize categories, shipping, and pricing.
+
+**Step 4 — Test with One Product**
+Go to **Products**, find a test item, and click **Sync to eBay**. Verify the listing looks correct on eBay before syncing more products.
+
+**Step 5 — Enable Automation**
+Once you're comfortable, turn on the auto-listing pipeline in Settings. New products will automatically get AI-enhanced titles, processed images, and be listed on eBay.
+
+That's it! Check the **Dashboard** regularly for sync status and health metrics.`,
+      'Getting Started',
+      2,
+    ],
+    [
+      'Understanding the Dashboard',
+      `The Dashboard is your command center for monitoring ProductBridge activity. Here's what each section shows:
+
+**Connection Status** — Shows whether Shopify and eBay are connected and healthy. Green means connected; red means you need to re-authenticate or check your credentials.
+
+**Product Stats** — Total mapped products, active eBay listings, and pending sync items. This gives you a quick overview of your inventory status across platforms.
+
+**Recent Activity** — A feed of the latest sync operations, order imports, and pipeline events. Check this to verify things are running smoothly or to spot errors.
+
+**Listing Health** — Summary metrics including average days listed, stale listing count, and price-dropped items. Use this to identify slow-moving inventory that might need attention.
+
+The Dashboard auto-refreshes every 15 seconds, so you're always seeing current data. For deeper analytics, check the **Analytics** page.`,
+      'Getting Started',
+      3,
+    ],
+  ];
+
+  for (const [question, answer, category, sortOrder] of entries) {
+    insert.run(question, answer, category, sortOrder, question);
+  }
+
+  // Assign sort_order to existing seed content where not set
+  const sortOrders: Record<string, [string, number][]> = {
+    products: [
+      ['How do I sync products from Shopify to eBay?', 1],
+      ['What are per-product overrides?', 2],
+      ['How do I filter and search products?', 3],
+      ['How do price drops work?', 4],
+      ['What eBay listing formats are supported?', 5],
+      ['How does inventory sync work?', 6],
+    ],
+    mappings: [
+      ['How do I manage field mappings?', 1],
+      ['How do I export/import mappings?', 2],
+    ],
+    pipeline: [
+      ['What is the auto-listing pipeline?', 1],
+      ['What do the pipeline stages mean?', 2],
+      ['How does image processing work?', 3],
+    ],
+    orders: [
+      ['How do I manage orders?', 1],
+    ],
+    analytics: [
+      ['How do I check listing health?', 1],
+    ],
+    chat: [
+      ['How do I use the chat assistant?', 1],
+    ],
+    general: [
+      ['How do I get started with ProductBridge?', 1],
+      ['What safety guards are in place?', 2],
+      ['How do I troubleshoot sync errors?', 3],
+      ['What is the capabilities registry?', 4],
+      ['How do I submit a feature request?', 5],
+      ['How do I contact support?', 6],
+    ],
+  };
+
+  const updateSort = sqlite.prepare(
+    `UPDATE help_questions SET sort_order = ? WHERE question = ? AND sort_order = 0`,
+  );
+
+  for (const [, articles] of Object.entries(sortOrders)) {
+    for (const [question, order] of articles) {
+      updateSort.run(order, question);
+    }
+  }
+};
+
 export const getDb = async () => {
   if (!dbInstance) {
     const filePath = await ensureDbPath();
     rawSqlite = new Database(filePath);
     initTables(rawSqlite);
     migrateProductMappings(rawSqlite);
+    migrateHelpQuestions(rawSqlite);
     initExtraTables(rawSqlite);
     await seedDefaultMappings(rawSqlite);
     seedHelpContent(rawSqlite);
+    seedGettingStartedContent(rawSqlite);
     seedDefaultSettings(rawSqlite);
     dbInstance = drizzle(rawSqlite, { schema });
   }

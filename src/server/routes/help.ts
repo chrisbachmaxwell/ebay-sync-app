@@ -251,12 +251,79 @@ router.get('/api/help/faq', async (_req: Request, res: Response) => {
   try {
     const db = await getRawDb();
     const faq = db.prepare(
-      `SELECT id, question, answer, category, updated_at FROM help_questions WHERE status = 'published' ORDER BY category, created_at DESC`
+      `SELECT id, question, answer, category, sort_order, updated_at FROM help_questions WHERE status = 'published' ORDER BY category, sort_order ASC, created_at ASC`
     ).all();
 
     res.json({ data: faq, total: faq.length });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch FAQ', detail: String(err) });
+  }
+});
+
+/** GET /api/help/categories — Returns categories with article counts */
+router.get('/api/help/categories', async (_req: Request, res: Response) => {
+  try {
+    const db = await getRawDb();
+    const cats = db.prepare(
+      `SELECT category, COUNT(*) as count FROM help_questions WHERE status = 'published' AND category IS NOT NULL GROUP BY category ORDER BY category`
+    ).all() as { category: string; count: number }[];
+
+    res.json({ data: cats });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch categories', detail: String(err) });
+  }
+});
+
+/** GET /api/help/articles — List published articles, optionally filter by category */
+router.get('/api/help/articles', async (req: Request, res: Response) => {
+  try {
+    const db = await getRawDb();
+    const category = (req.query.category as string || '').trim();
+
+    let articles;
+    if (category) {
+      articles = db.prepare(
+        `SELECT id, question, answer, category, sort_order, updated_at FROM help_questions WHERE status = 'published' AND category = ? ORDER BY sort_order ASC, created_at ASC`
+      ).all(category);
+    } else {
+      articles = db.prepare(
+        `SELECT id, question, answer, category, sort_order, updated_at FROM help_questions WHERE status = 'published' ORDER BY category, sort_order ASC, created_at ASC`
+      ).all();
+    }
+
+    res.json({ data: articles, total: articles.length });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch articles', detail: String(err) });
+  }
+});
+
+/** GET /api/help/articles/:id — Get single article with prev/next IDs */
+router.get('/api/help/articles/:id', async (req: Request, res: Response) => {
+  try {
+    const db = await getRawDb();
+    const id = Number(req.params.id);
+
+    const article = db.prepare(
+      `SELECT id, question, answer, category, sort_order, updated_at FROM help_questions WHERE id = ? AND status = 'published'`
+    ).get(id) as { id: number; category: string; sort_order: number } | undefined;
+
+    if (!article) {
+      res.status(404).json({ error: 'Article not found' });
+      return;
+    }
+
+    // Get all published articles ordered to find prev/next
+    const allArticles = db.prepare(
+      `SELECT id FROM help_questions WHERE status = 'published' ORDER BY category, sort_order ASC, created_at ASC`
+    ).all() as { id: number }[];
+
+    const idx = allArticles.findIndex((a) => a.id === id);
+    const prevId = idx > 0 ? allArticles[idx - 1].id : null;
+    const nextId = idx < allArticles.length - 1 ? allArticles[idx + 1].id : null;
+
+    res.json({ ...article, prevId, nextId });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch article', detail: String(err) });
   }
 });
 

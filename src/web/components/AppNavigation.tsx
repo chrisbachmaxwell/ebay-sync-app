@@ -121,14 +121,19 @@ const AppNavigation: React.FC = () => {
           {
             label: 'Help',
             icon: undefined,
-            selected: isSelected('/help') || isSelected('/help/admin'),
+            selected: location.pathname.startsWith('/help'),
             onClick: () => navigate('/help'),
             url: '/help',
             subNavigationItems: [
               {
-                label: 'FAQ',
+                label: 'Documentation',
                 url: '/help',
                 onClick: () => navigate('/help'),
+              },
+              {
+                label: 'Ask a Question',
+                url: '/help/ask',
+                onClick: () => navigate('/help/ask'),
               },
               {
                 label: 'Admin',

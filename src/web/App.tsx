@@ -13,6 +13,10 @@ import Mappings from './pages/Mappings';
 import ImageProcessor from './pages/ImageProcessor';
 import Pipeline from './pages/Pipeline';
 import Help from './pages/Help';
+import HelpCenter from './pages/HelpCenter';
+import HelpArticlePage from './pages/HelpArticle';
+import HelpCategoryPage from './pages/HelpCategory';
+import HelpAsk from './pages/HelpAsk';
 import HelpAdmin from './pages/HelpAdmin';
 import FeatureRequests from './pages/FeatureRequests';
 import FeatureAdmin from './pages/FeatureAdmin';
@@ -64,7 +68,11 @@ const AppFrame: React.FC = () => {
         <Route path="/images" element={<ImageProcessor />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/logs" element={<Analytics />} />
-        <Route path="/help" element={<Help />} />
+        <Route path="/help" element={<HelpCenter />}>
+          <Route path="article/:id" element={<HelpArticlePage />} />
+          <Route path="category/:category" element={<HelpCategoryPage />} />
+          <Route path="ask" element={<HelpAsk />} />
+        </Route>
         <Route path="/help/admin" element={<HelpAdmin />} />
         <Route path="/features" element={<FeatureRequests />} />
         <Route path="/features/admin" element={<FeatureAdmin />} />
