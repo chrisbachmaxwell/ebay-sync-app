@@ -1,7 +1,8 @@
 import React from 'react';
 import { AppProvider, Frame, TopBar } from '@shopify/polaris';
 import enTranslations from '@shopify/polaris/locales/en.json';
-import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { BrowserRouter, Route, Routes, useLocation, Link } from 'react-router-dom';
+import { NavMenu } from '@shopify/app-bridge-react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Dashboard from './pages/Dashboard';
 import Listings, { ListingDetail } from './pages/Listings';
@@ -34,11 +35,43 @@ const queryClient = new QueryClient({
   },
 });
 
+/** Detect whether the app is embedded inside Shopify Admin */
+const isEmbedded = (): boolean => {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true; // cross-origin iframe = embedded
+  }
+};
+
+/**
+ * Shopify App Bridge NavMenu — renders navigation items in Shopify's sidebar.
+ * Only rendered when embedded in Shopify Admin.
+ */
+const ShopifyNavMenu: React.FC = () => (
+  <NavMenu>
+    <Link to="/" rel="home">Dashboard</Link>
+    <Link to="/listings">Products</Link>
+    <Link to="/ebay/listings">eBay Listings</Link>
+    <Link to="/orders">Orders</Link>
+    <Link to="/mappings">Mappings</Link>
+    <Link to="/pipeline">Pipeline</Link>
+    <Link to="/images">Images</Link>
+    <Link to="/logs">Analytics</Link>
+    <Link to="/settings">Settings</Link>
+    <Link to="/help">Help</Link>
+    <Link to="/features">Feature Requests</Link>
+  </NavMenu>
+);
+
 const AppFrame: React.FC = () => {
   const location = useLocation();
   const { sidebarOpen, toggleSidebar } = useAppStore();
+  const embedded = isEmbedded();
 
-  const topBarMarkup = (
+  // When embedded in Shopify, don't render the Polaris sidebar or top bar —
+  // Shopify Admin provides its own chrome via App Bridge NavMenu.
+  const topBarMarkup = embedded ? undefined : (
     <TopBar
       showNavigationToggle
       onNavigationToggle={toggleSidebar}
@@ -50,36 +83,39 @@ const AppFrame: React.FC = () => {
   );
 
   return (
-    <Frame
-      navigation={<AppNavigation />}
-      topBar={topBarMarkup}
-      showMobileNavigation={!sidebarOpen}
-      onNavigationDismiss={toggleSidebar}
-    >
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/listings" element={<ShopifyProducts />} />
-        <Route path="/listings/:id" element={<ShopifyProductDetail />} />
-        <Route path="/ebay/listings" element={<Listings />} />
-        <Route path="/ebay/listings/:id" element={<ListingDetail />} />
-        <Route path="/orders" element={<Orders />} />
-        <Route path="/mappings" element={<Mappings />} />
-        <Route path="/pipeline" element={<Pipeline />} />
-        <Route path="/images" element={<ImageProcessor />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/logs" element={<Analytics />} />
-        <Route path="/help" element={<HelpCenter />}>
-          <Route path="article/:id" element={<HelpArticlePage />} />
-          <Route path="category/:category" element={<HelpCategoryPage />} />
-          <Route path="ask" element={<HelpAsk />} />
-        </Route>
-        <Route path="/help/admin" element={<HelpAdmin />} />
-        <Route path="/features" element={<FeatureRequests />} />
-        <Route path="/features/admin" element={<FeatureAdmin />} />
-      </Routes>
+    <>
+      {embedded && <ShopifyNavMenu />}
+      <Frame
+        navigation={embedded ? undefined : <AppNavigation />}
+        topBar={topBarMarkup}
+        showMobileNavigation={embedded ? false : !sidebarOpen}
+        onNavigationDismiss={toggleSidebar}
+      >
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/listings" element={<ShopifyProducts />} />
+          <Route path="/listings/:id" element={<ShopifyProductDetail />} />
+          <Route path="/ebay/listings" element={<Listings />} />
+          <Route path="/ebay/listings/:id" element={<ListingDetail />} />
+          <Route path="/orders" element={<Orders />} />
+          <Route path="/mappings" element={<Mappings />} />
+          <Route path="/pipeline" element={<Pipeline />} />
+          <Route path="/images" element={<ImageProcessor />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/logs" element={<Analytics />} />
+          <Route path="/help" element={<HelpCenter />}>
+            <Route path="article/:id" element={<HelpArticlePage />} />
+            <Route path="category/:category" element={<HelpCategoryPage />} />
+            <Route path="ask" element={<HelpAsk />} />
+          </Route>
+          <Route path="/help/admin" element={<HelpAdmin />} />
+          <Route path="/features" element={<FeatureRequests />} />
+          <Route path="/features/admin" element={<FeatureAdmin />} />
+        </Routes>
 
-      <ChatWidget />
-    </Frame>
+        <ChatWidget />
+      </Frame>
+    </>
   );
 };
 

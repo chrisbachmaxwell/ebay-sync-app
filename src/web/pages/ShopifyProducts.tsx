@@ -536,13 +536,15 @@ const ShopifyProducts: React.FC = () => {
           />
         </IndexTable.Cell>
         <IndexTable.Cell>
-          <Button variant="plain" onClick={() => navigate(`/listings/${product.shopifyProductId}`)}>
-            {product.title}
-          </Button>
+          <InlineStack gap="200" blockAlign="center" wrap={false}>
+            <Button variant="plain" onClick={() => navigate(`/listings/${product.shopifyProductId}`)}>
+              {product.title}
+            </Button>
+            {getShopifyStatusBadge(product.shopifyStatus)}
+          </InlineStack>
         </IndexTable.Cell>
         <IndexTable.Cell>{product.sku || '—'}</IndexTable.Cell>
         <IndexTable.Cell>{formatMoney(product.price)}</IndexTable.Cell>
-        <IndexTable.Cell>{getShopifyStatusBadge(product.shopifyStatus)}</IndexTable.Cell>
         <IndexTable.Cell>{getBinaryBadge(product.hasAiDescription)}</IndexTable.Cell>
         <IndexTable.Cell>{getBinaryBadge(product.hasProcessedImages)}</IndexTable.Cell>
         <IndexTable.Cell>{getEbayBadge(product.ebayStatus)}</IndexTable.Cell>
@@ -699,7 +701,6 @@ const ShopifyProducts: React.FC = () => {
                     { title: 'Product Name' },
                     { title: 'SKU' },
                     { title: 'Price' },
-                    { title: 'Shopify Status' },
                     { title: 'AI Description' },
                     { title: 'Images Processed' },
                     { title: 'eBay Status' },
