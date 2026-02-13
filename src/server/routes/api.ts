@@ -1027,7 +1027,8 @@ router.delete('/api/test/delete-product', async (req: Request, res: Response) =>
     }
 
     // Clean up local DB records
-    db.prepare(`DELETE FROM product_listings WHERE shopify_product_id = ?`).run(productId);
+    db.prepare(`DELETE FROM product_mappings WHERE shopify_product_id = ?`).run(productId);
+    db.prepare(`DELETE FROM product_mapping_overrides WHERE shopify_product_id = ?`).run(productId);
     db.prepare(`DELETE FROM sync_log WHERE entity_id = ?`).run(productId);
 
     info(`[API] Product ${productId} deleted from Shopify + local DB`);
