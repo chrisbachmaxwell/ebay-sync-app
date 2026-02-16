@@ -35,6 +35,7 @@ import {
 } from './watcher-db.js';
 import { searchShopifyProduct } from './shopify-matcher.js';
 import { uploadImagesToShopify } from './shopify-uploader.js';
+import { getDefaultForCategory, type PhotoTemplate } from '../services/photo-templates.js';
 
 // ── Configuration ──────────────────────────────────────────────────────
 
@@ -420,6 +421,9 @@ async function handleNewFolder(
     if (uploadResult.uploaded > 0) {
       await updateDone(recordId, uploadResult.uploaded);
       info(`[Watcher] ✅ Done: ${folderName} → ${match.title} (${uploadResult.uploaded} images uploaded)`);
+
+      // Phase 3: Auto-apply default template for this category
+      await autoApplyTemplate(presetName, match.id);
     } else {
       await updateError(recordId, `All ${uploadResult.failed} image uploads failed`);
       logError(`[Watcher] ❌ All uploads failed for ${folderName}`);
@@ -440,6 +444,47 @@ async function handleNewFolder(
     }
   } finally {
     processingFolders.delete(folderPath);
+  }
+}
+
+/**
+ * Phase 3: Auto-apply the default photo template for a category after upload.
+ *
+ * Looks up the default template for the given preset (category) name.
+ * If one exists, triggers a reprocess-all on the Shopify product using
+ * the template's PhotoRoom params.
+ */
+async function autoApplyTemplate(presetName: string, shopifyProductId: string): Promise<void> {
+  try {
+    const template = await getDefaultForCategory(presetName);
+    if (!template) {
+      info(`[Watcher] No default template for category "${presetName}" — skipping auto-apply`);
+      return;
+    }
+
+    info(`[Watcher] Auto-applying template "${template.name}" to product ${shopifyProductId}`);
+
+    const port = parseInt(process.env.PORT || '3000', 10);
+    const response = await fetch(
+      `http://localhost:${port}/api/templates/${template.id}/apply/${shopifyProductId}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+
+    if (response.ok) {
+      const data = (await response.json()) as any;
+      info(
+        `[Watcher] ✅ Template auto-applied: "${template.name}" → product ${shopifyProductId} (${data.succeeded}/${data.total} images)`,
+      );
+    } else {
+      const text = await response.text();
+      warn(`[Watcher] ⚠️ Template auto-apply failed (${response.status}): ${text}`);
+    }
+  } catch (err) {
+    warn(`[Watcher] ⚠️ Template auto-apply error: ${err}`);
+    // Non-fatal — images are already uploaded, template apply is a bonus
   }
 }
 

@@ -103,6 +103,17 @@ export const fieldMappings = sqliteTable('field_mappings', {
   updatedAt: text('updated_at').default("datetime('now')"),
 });
 
+// ── Phase 3: Photo Templates ───────────────────────────────────────────
+export const photoTemplates = sqliteTable('photo_templates', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  category: text('category'),
+  paramsJson: text('params_json').notNull().default('{}'),
+  isDefault: integer('is_default').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
 // ── Phase 2: Image Processing Log ──────────────────────────────────────
 export const imageProcessingLog = sqliteTable('image_processing_log', {
   id: integer('id').primaryKey({ autoIncrement: true }),

@@ -37,6 +37,14 @@ const suggestions = [
   'republish stale listings',
   'cleanup duplicate orders',
   'show settings',
+  // Phase 3: Photo editing + templates
+  'add more white space',
+  'remove the shadow',
+  'make background gray',
+  'tighter crop',
+  'reprocess all photos',
+  'list templates',
+  'save settings as template',
 ];
 
 // Fallback quick actions (used until capabilities API responds)
@@ -73,6 +81,13 @@ const pageQuickActions: Record<string, Array<{ label: string; message: string }>
   '/orders': [
     { label: '🔄 Sync recent orders', message: 'sync orders' },
     { label: '📋 Show orders', message: 'show orders' },
+  ],
+  // Phase 3: Photo editing quick actions on product pages
+  '/listings/:id': [
+    { label: '🖼️ Reprocess all photos', message: 'reprocess all photos' },
+    { label: '📋 List templates', message: 'list templates' },
+    { label: '⬜ More white space', message: 'add more white space' },
+    { label: '🚫 Remove shadow', message: 'remove the shadow' },
   ],
   '/mappings': [
     { label: '⚙️ Show current mappings', message: 'show mappings' },
@@ -159,8 +174,16 @@ const ChatWidget: React.FC = () => {
     }
   }, [navToast]);
 
-  // Get contextual quick actions for the current page
-  const currentPageActions = pageQuickActions[location.pathname] || pageQuickActions['/'] || [];
+  // Get contextual quick actions for the current page (supports dynamic routes)
+  const currentPageActions = (() => {
+    const exact = pageQuickActions[location.pathname];
+    if (exact) return exact;
+    // Check for /listings/:id pattern
+    if (/^\/listings\/\d+/.test(location.pathname)) {
+      return pageQuickActions['/listings/:id'] || [];
+    }
+    return pageQuickActions['/'] || [];
+  })();
 
   const parseCommand = (message: string) => {
     for (const pattern of commandPatterns) {

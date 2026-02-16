@@ -18,8 +18,10 @@ import helpRoutes from './routes/help.js';
 import featureRoutes from './routes/features.js';
 import watcherRoutes from './routes/watcher.js';
 import imageRoutes from './routes/images.js';
+import templateRoutes from './routes/templates.js';
 import { apiKeyAuth, rateLimit } from './middleware/auth.js';
 import { getCapabilities, getNewCapabilities } from './capabilities.js';
+import { initPhotoTemplatesTable } from '../services/photo-templates.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -89,6 +91,7 @@ app.use(helpRoutes);
 app.use(featureRoutes);
 app.use(watcherRoutes);
 app.use(imageRoutes);
+app.use(templateRoutes);
 
 // --- Capabilities discovery endpoint ---
 app.get('/api/capabilities', (_req, res) => {
@@ -148,6 +151,9 @@ async function start() {
 
     // Ensure new tables exist
     initExtraTables(rawDb);
+
+    // Phase 3: Initialize photo templates table
+    await initPhotoTemplatesTable();
 
     // Seed default settings
     seedDefaultSettings(rawDb);

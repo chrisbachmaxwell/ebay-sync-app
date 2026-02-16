@@ -256,3 +256,46 @@ registerCapability({
   apiEndpoints: ['GET /api/status'],
   addedAt: '2025-12-01',
 });
+
+// Phase 3: Photo Editing + Templates
+registerCapability({
+  id: 'photo-templates',
+  name: 'Photo Templates',
+  description: 'Create, manage, and apply reusable PhotoRoom settings templates. Set defaults per StyleShoots category for auto-apply on new photos.',
+  category: 'images',
+  examplePrompts: [
+    'list templates',
+    'what templates do we have',
+    'save settings as small lenses template',
+    'apply the small lens template',
+    'set this as default for small cameras',
+  ],
+  apiEndpoints: [
+    'GET /api/templates',
+    'POST /api/templates',
+    'PUT /api/templates/:id',
+    'DELETE /api/templates/:id',
+    'POST /api/templates/:id/apply/:productId',
+    'POST /api/templates/:id/set-default',
+  ],
+  addedAt: '2026-02-16',
+});
+
+registerCapability({
+  id: 'chat-photo-editing',
+  name: 'Chat Photo Editing',
+  description: 'Edit product photos through natural language chat commands. Adjust background color, padding, shadow, and trigger reprocessing.',
+  category: 'images',
+  examplePrompts: [
+    'add more white space',
+    'remove the shadow',
+    'make background gray',
+    'tighter crop',
+    'reprocess all photos',
+  ],
+  apiEndpoints: [
+    'POST /api/products/:id/images/reprocess',
+    'POST /api/products/:id/images/reprocess-all',
+  ],
+  addedAt: '2026-02-16',
+});

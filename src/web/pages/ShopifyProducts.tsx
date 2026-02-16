@@ -31,6 +31,7 @@ import { apiClient, useListings } from '../hooks/useApi';
 import { useAppStore } from '../store';
 import PhotoGallery, { type GalleryImage } from '../components/PhotoGallery';
 import PhotoControls, { type PhotoRoomParams } from '../components/PhotoControls';
+import TemplateManager from '../components/TemplateManager';
 
 /* ────────────────────────── helpers ────────────────────────── */
 
@@ -341,6 +342,16 @@ export const ShopifyProductDetail: React.FC = () => {
               reprocessingAll={reprocessAllMutation.isPending}
               previewUrl={previewUrl}
               imageCount={images.length}
+            />
+          </Layout.Section>
+
+          {/* ── Phase 3: Photo Templates ── */}
+          <Layout.Section>
+            <TemplateManager
+              productId={id}
+              onApplied={() => {
+                queryClient.invalidateQueries({ queryKey: ['product-images', id] });
+              }}
             />
           </Layout.Section>
 
