@@ -76,8 +76,8 @@ export const authTokens = sqliteTable('auth_tokens', {
 
 export const styleshootWatchLog = sqliteTable('styleshoot_watch_log', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  folderName: text('folder_name').notNull().unique(),
-  folderPath: text('folder_path').notNull(),
+  folderName: text('folder_name').notNull(),
+  folderPath: text('folder_path').notNull().unique(),
   presetName: text('preset_name'),
   parsedProductName: text('parsed_product_name'),
   parsedSerialSuffix: text('parsed_serial_suffix'),

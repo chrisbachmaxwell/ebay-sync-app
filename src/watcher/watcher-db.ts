@@ -36,8 +36,8 @@ export async function initWatcherTable(): Promise<void> {
   db.exec(`
     CREATE TABLE IF NOT EXISTS styleshoot_watch_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      folder_name TEXT NOT NULL UNIQUE,
-      folder_path TEXT NOT NULL,
+      folder_name TEXT NOT NULL,
+      folder_path TEXT NOT NULL UNIQUE,
       preset_name TEXT,
       parsed_product_name TEXT,
       parsed_serial_suffix TEXT,
@@ -56,32 +56,55 @@ export async function initWatcherTable(): Promise<void> {
 
   // Create indexes if they don't exist
   db.exec(`CREATE INDEX IF NOT EXISTS idx_watch_log_status ON styleshoot_watch_log(status);`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_watch_log_folder ON styleshoot_watch_log(folder_name);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_watch_log_folder ON styleshoot_watch_log(folder_path);`);
 
   info('[WatcherDB] styleshoot_watch_log table ready');
+
+  // Crash recovery: reset any "uploading" entries back to "matched" so they get retried
+  await recoverStuckUploads();
+}
+
+/**
+ * Crash recovery: reset any folders stuck in 'uploading' status back to 'matched'
+ * so they get retried on the next scan. This handles the case where the process
+ * crashed mid-upload.
+ */
+export async function recoverStuckUploads(): Promise<void> {
+  const db = await getRawDb();
+  const now = Math.floor(Date.now() / 1000);
+
+  const result = db.prepare(`
+    UPDATE styleshoot_watch_log
+    SET status = 'matched', error = NULL, updated_at = ?
+    WHERE status = 'uploading'
+  `).run(now);
+
+  if (result.changes > 0) {
+    info(`[WatcherDB] Crash recovery: reset ${result.changes} stuck 'uploading' entries back to 'matched'`);
+  }
 }
 
 /**
  * Check if a folder has already been processed.
  */
-export async function isProcessed(folderName: string): Promise<boolean> {
+export async function isProcessed(folderPath: string): Promise<boolean> {
   const db = await getRawDb();
   const row = db
-    .prepare(`SELECT status FROM styleshoot_watch_log WHERE folder_name = ?`)
-    .get(folderName) as { status: string } | undefined;
+    .prepare(`SELECT status FROM styleshoot_watch_log WHERE folder_path = ?`)
+    .get(folderPath) as { status: string } | undefined;
 
-  // Considered "processed" if status is done or processing
-  return row?.status === 'done' || row?.status === 'uploading';
+  // Considered "processed" if status is done
+  return row?.status === 'done';
 }
 
 /**
  * Check if a folder already has a record (any status).
  */
-export async function hasRecord(folderName: string): Promise<boolean> {
+export async function hasRecord(folderPath: string): Promise<boolean> {
   const db = await getRawDb();
   const row = db
-    .prepare(`SELECT id FROM styleshoot_watch_log WHERE folder_name = ?`)
-    .get(folderName) as { id: number } | undefined;
+    .prepare(`SELECT id FROM styleshoot_watch_log WHERE folder_path = ?`)
+    .get(folderPath) as { id: number } | undefined;
   return !!row;
 }
 

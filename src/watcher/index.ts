@@ -106,7 +106,8 @@ export async function startWatcher(options?: {
     mountConnected = checkMount(watchPath);
 
     if (!wasConnected && mountConnected) {
-      info('[Watcher] Mount reconnected — rescanning...');
+      info('[Watcher] Mount reconnected — restarting chokidar and rescanning...');
+      startChokidarWatcher(watchPath, stabilizeMs);
       scanExistingFolders().catch(err => logError(`[Watcher] Rescan error: ${err}`));
     } else if (wasConnected && !mountConnected) {
       warn('[Watcher] Mount disconnected — waiting for reconnection...');
@@ -310,17 +311,13 @@ async function scanExistingFolders(): Promise<void> {
         // Skip already processed or currently processing
         if (processingFolders.has(productPath)) continue;
 
-        const alreadyRecorded = await hasRecord(folderName);
-        const alreadyDone = await isProcessed(folderName);
-
+        const alreadyDone = await isProcessed(productPath);
         if (alreadyDone) continue;
 
-        if (!alreadyRecorded) {
-          info(`[Watcher] Found unprocessed folder: ${preset.name}/${folderName}`);
-          handleNewFolder(productPath, preset.name, folderName).catch(err => {
-            logError(`[Watcher] Error handling folder ${folderName}: ${err}`);
-          });
-        }
+        info(`[Watcher] Found unprocessed folder: ${preset.name}/${folderName}`);
+        handleNewFolder(productPath, preset.name, folderName).catch(err => {
+          logError(`[Watcher] Error handling folder ${folderName}: ${err}`);
+        });
       }
     }
 
@@ -344,7 +341,7 @@ async function handleNewFolder(
 
   try {
     // Already done?
-    if (await isProcessed(folderName)) {
+    if (await isProcessed(folderPath)) {
       info(`[Watcher] Already processed: ${folderName}`);
       return;
     }
@@ -367,7 +364,7 @@ async function handleNewFolder(
     const imagePaths = collectImages(folderPath);
     if (imagePaths.length < MIN_IMAGES) {
       warn(`[Watcher] No images found in ${folderName} — skipping`);
-      if (!(await hasRecord(folderName))) {
+      if (!(await hasRecord(folderPath))) {
         const id = await recordDetection({
           folderName,
           folderPath,
@@ -385,11 +382,11 @@ async function handleNewFolder(
 
     // Record in DB
     let recordId: number;
-    if (await hasRecord(folderName)) {
+    if (await hasRecord(folderPath)) {
       // Get existing record ID
       const { getRawDb } = await import('../db/client.js');
       const db = await getRawDb();
-      const row = db.prepare(`SELECT id FROM styleshoot_watch_log WHERE folder_name = ?`).get(folderName) as { id: number };
+      const row = db.prepare(`SELECT id FROM styleshoot_watch_log WHERE folder_path = ?`).get(folderPath) as { id: number };
       recordId = row.id;
     } else {
       recordId = await recordDetection({
@@ -430,10 +427,10 @@ async function handleNewFolder(
   } catch (err) {
     logError(`[Watcher] Pipeline error for ${folderName}: ${err}`);
     try {
-      if (await hasRecord(folderName)) {
+      if (await hasRecord(folderPath)) {
         const { getRawDb } = await import('../db/client.js');
         const db = await getRawDb();
-        const row = db.prepare(`SELECT id FROM styleshoot_watch_log WHERE folder_name = ?`).get(folderName) as { id: number } | undefined;
+        const row = db.prepare(`SELECT id FROM styleshoot_watch_log WHERE folder_path = ?`).get(folderPath) as { id: number } | undefined;
         if (row) {
           await updateError(row.id, String(err));
         }
