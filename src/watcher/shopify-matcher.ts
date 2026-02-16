@@ -134,7 +134,7 @@ export async function searchShopifyProduct(
         const serialInTitle = titleLower.includes(`#${serialSuffix}`) ||
           titleLower.includes(serialSuffix);
         const serialInSku = product.variants.some(v =>
-          v.sku.endsWith(serialSuffix)
+          v.sku && v.sku.endsWith(serialSuffix)
         );
 
         if (serialInTitle || serialInSku) {

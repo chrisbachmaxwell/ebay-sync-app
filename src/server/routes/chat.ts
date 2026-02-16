@@ -660,16 +660,23 @@ async function tryHandlePhotoCommand(
     const productId = productIdMatch[1];
     const params = parsePhotoParamsFromMessage(message);
     const isReprocessAll = /all\s*(?:photos|images)|reprocess\s*all/i.test(lower);
+    // Extract image URL from message for single-image reprocess
+    const imageUrlMatch = message.match(/https?:\/\/[^\s"'<>]+\.(?:png|jpe?g|gif|webp)(?:\?[^\s"'<>]*)?/i);
+    const imageUrl = imageUrlMatch ? imageUrlMatch[0] : undefined;
 
     try {
       const endpoint = isReprocessAll
         ? `http://localhost:${PORT}/api/products/${productId}/images/reprocess-all`
-        : `http://localhost:${PORT}/api/products/${productId}/images/reprocess-all`;
+        : `http://localhost:${PORT}/api/products/${productId}/images/reprocess`;
+
+      const body = isReprocessAll
+        ? params
+        : { ...params, ...(imageUrl ? { imageUrl } : {}) };
 
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
+        body: JSON.stringify(body),
       });
       const data = (await response.json()) as any;
 

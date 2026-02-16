@@ -7,7 +7,11 @@ import { useAppStore, ChatMessage } from '../store';
 const commandPatterns = [
   // Sync commands
   { pattern: /sync\s+(all\s+)?products?/i, action: 'sync_products', method: 'POST', endpoint: '/api/sync/products' },
-  { pattern: /sync\s+orders?/i, action: 'sync_orders', method: 'POST', endpoint: '/api/sync/trigger', data: { type: 'orders' } },
+  { pattern: /sync\s+orders?\s+since\s+(\d{4}-\d{2}-\d{2})/i, action: 'sync_orders_dated', method: 'POST', endpoint: '/api/sync/trigger', dataFn: (m: RegExpMatchArray) => ({ type: 'orders', startDate: m[1] }) },
+  { pattern: /sync\s+orders?/i, action: 'sync_orders', method: 'POST', endpoint: '/api/sync/trigger', dataFn: () => {
+    const since = new Date(); since.setDate(since.getDate() - 7);
+    return { type: 'orders', startDate: since.toISOString().slice(0, 10) };
+  } },
   { pattern: /sync\s+inventory/i, action: 'sync_inventory', method: 'POST', endpoint: '/api/sync/inventory' },
   
   // Listing commands
@@ -187,8 +191,9 @@ const ChatWidget: React.FC = () => {
 
   const parseCommand = (message: string) => {
     for (const pattern of commandPatterns) {
-      if (pattern.pattern.test(message)) {
-        return pattern;
+      const match = pattern.pattern.exec(message);
+      if (match) {
+        return { ...pattern, match };
       }
     }
     return null;
@@ -317,7 +322,8 @@ const ChatWidget: React.FC = () => {
     try {
       if (command) {
         // Fast-path: execute recognized API command directly
-        const result = await executeApiCall(command.endpoint, command.method, command.data);
+        const commandData = 'dataFn' in command && command.dataFn ? command.dataFn(command.match) : ('data' in command ? command.data : undefined);
+        const result = await executeApiCall(command.endpoint, command.method, commandData);
         const formattedResponse = formatApiResponse(command.action, result);
         
         addChatMessage({
