@@ -1,4 +1,4 @@
-import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { integer, real, sqliteTable, text, index } from 'drizzle-orm/sqlite-core';
 
 export const productMappings = sqliteTable('product_mappings', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -101,4 +101,18 @@ export const fieldMappings = sqliteTable('field_mappings', {
   isDefault: integer('is_default', { mode: 'boolean' }).default(false),
   createdAt: text('created_at').default("datetime('now')"),
   updatedAt: text('updated_at').default("datetime('now')"),
+});
+
+// ── Phase 2: Image Processing Log ──────────────────────────────────────
+export const imageProcessingLog = sqliteTable('image_processing_log', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  productId: text('product_id').notNull(),
+  imageUrl: text('image_url').notNull(),
+  originalUrl: text('original_url').notNull(),
+  processedUrl: text('processed_url'),
+  paramsJson: text('params_json'),  // JSON: { background, padding, shadow }
+  status: text('status').notNull().default('pending'), // pending, processing, completed, error
+  error: text('error'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });

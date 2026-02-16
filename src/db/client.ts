@@ -103,6 +103,20 @@ const initExtraTables = (sqlite: InstanceType<typeof Database>) => {
       updated_at TEXT DEFAULT (datetime('now')),
       UNIQUE(shopify_product_id, category, field_name)
     );
+    CREATE TABLE IF NOT EXISTS image_processing_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id TEXT NOT NULL,
+      image_url TEXT NOT NULL,
+      original_url TEXT NOT NULL,
+      processed_url TEXT,
+      params_json TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      error TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_image_processing_log_product ON image_processing_log(product_id);
+    CREATE INDEX IF NOT EXISTS idx_image_processing_log_status ON image_processing_log(status);
     CREATE TABLE IF NOT EXISTS product_pipeline_status (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       shopify_product_id TEXT NOT NULL UNIQUE,

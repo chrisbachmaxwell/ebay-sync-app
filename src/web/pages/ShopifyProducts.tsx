@@ -25,10 +25,12 @@ import {
   SearchIcon,
   CheckCircleIcon,
 } from '@shopify/polaris-icons';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiClient, useListings } from '../hooks/useApi';
 import { useAppStore } from '../store';
+import PhotoGallery, { type GalleryImage } from '../components/PhotoGallery';
+import PhotoControls, { type PhotoRoomParams } from '../components/PhotoControls';
 
 /* ────────────────────────── helpers ────────────────────────── */
 
@@ -36,16 +38,16 @@ const PLACEHOLDER_IMG =
   'https://cdn.shopify.com/s/files/1/0533/2089/files/placeholder-images-image_large.png';
 
 const formatMoney = (value?: number | string | null) => {
-  if (value === null || value === undefined || value === '') return '—';
+  if (value === null || value === undefined || value === '') return '-';
   const numberValue = typeof value === 'string' ? Number(value) : value;
-  if (Number.isNaN(numberValue)) return '—';
+  if (Number.isNaN(numberValue)) return '-';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(numberValue);
 };
 
 const formatTimestamp = (value?: number | string | null) => {
-  if (!value) return '—';
+  if (!value) return '-';
   const ms = typeof value === 'number' ? (value > 1_000_000_000_000 ? value : value * 1000) : Date.parse(value);
-  if (Number.isNaN(ms)) return '—';
+  if (Number.isNaN(ms)) return '-';
   return new Date(ms).toLocaleString();
 };
 
@@ -60,7 +62,7 @@ const getShopifyStatusBadge = (status?: string | null) => {
 const getEbayBadge = (status: string) => {
   if (status === 'listed') return <Badge tone="success">Listed</Badge>;
   if (status === 'draft') return <Badge tone="info">Draft</Badge>;
-  return <Text as="span" tone="subdued">—</Text>;
+  return <Text as="span" tone="subdued">-</Text>;
 };
 
 const StatusDot: React.FC<{ done: boolean; label?: string }> = ({ done, label }) => (
@@ -107,8 +109,11 @@ interface ProductsOverviewResponse {
 export const ShopifyProductDetail: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { addNotification } = useAppStore();
-  const [processedImages, setProcessedImages] = useState<string[]>([]);
+  const [galleryViewMode, setGalleryViewMode] = useState<'side-by-side' | 'toggle'>('side-by-side');
+  const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const { data: productInfo, isLoading: productLoading } = useQuery({
     queryKey: ['product-info', id],
@@ -130,6 +135,22 @@ export const ShopifyProductDetail: React.FC = () => {
     refetchInterval: 10000,
   });
 
+  // ── Phase 2: Fetch image gallery data ──
+  const { data: imageData, isLoading: imagesLoading } = useQuery({
+    queryKey: ['product-images', id],
+    queryFn: () =>
+      apiClient.get<{
+        ok: boolean;
+        images: GalleryImage[];
+        totalOriginal: number;
+        totalProcessed: number;
+      }>(`/products/${id}/images`),
+    enabled: Boolean(id),
+    refetchInterval: 15000,
+  });
+
+  const galleryImages: GalleryImage[] = imageData?.images ?? [];
+
   const { data: listingResponse } = useListings({ limit: 50, offset: 0, search: id });
   const listing = useMemo(() => {
     const normalized = (listingResponse?.data ?? []).map((item: any) => ({
@@ -143,7 +164,6 @@ export const ShopifyProductDetail: React.FC = () => {
   const product = productInfo?.product;
   const variant = product?.variant ?? product?.variants?.[0];
   const images: Array<{ id: number; src: string }> = product?.images ?? [];
-  const mainImage = product?.image?.src ?? images[0]?.src ?? PLACEHOLDER_IMG;
 
   const pipelineJob = pipelineJobs?.jobs?.[0];
   const pipelineSteps = pipelineJob?.steps ?? [];
@@ -177,20 +197,74 @@ export const ShopifyProductDetail: React.FC = () => {
     },
   });
 
-  const photoRoomMutation = useMutation({
-    mutationFn: () => apiClient.post<{ images?: string[] }>(`/images/process/${id}`),
+  // ── Phase 2: Reprocess single image ──
+  const reprocessMutation = useMutation({
+    mutationFn: ({ imageUrl, params }: { imageUrl: string; params: PhotoRoomParams }) =>
+      apiClient.post<{ ok: boolean; processedUrl?: string }>(`/products/${id}/images/reprocess`, {
+        imageUrl,
+        background: params.background,
+        padding: params.padding,
+        shadow: params.shadow,
+      }),
     onSuccess: (data) => {
-      setProcessedImages(data?.images ?? []);
-      addNotification({ type: 'success', title: 'Images processed with PhotoRoom', autoClose: 4000 });
+      setPreviewUrl(data?.processedUrl ?? null);
+      queryClient.invalidateQueries({ queryKey: ['product-images', id] });
+      addNotification({ type: 'success', title: 'Image reprocessed successfully', autoClose: 4000 });
     },
     onError: (error) => {
       addNotification({
         type: 'error',
-        title: 'PhotoRoom processing failed',
+        title: 'Reprocessing failed',
         message: error instanceof Error ? error.message : 'Unknown error',
       });
     },
   });
+
+  // ── Phase 2: Reprocess all images ──
+  const reprocessAllMutation = useMutation({
+    mutationFn: (params: PhotoRoomParams) =>
+      apiClient.post<{ ok: boolean; succeeded: number; failed: number }>(`/products/${id}/images/reprocess-all`, {
+        background: params.background,
+        padding: params.padding,
+        shadow: params.shadow,
+      }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['product-images', id] });
+      addNotification({
+        type: 'success',
+        title: 'All images reprocessed',
+        message: `${data?.succeeded ?? 0} succeeded, ${data?.failed ?? 0} failed`,
+        autoClose: 4000,
+      });
+    },
+    onError: (error) => {
+      addNotification({
+        type: 'error',
+        title: 'Bulk reprocessing failed',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    },
+  });
+
+  const handleReprocess = useCallback(
+    (imageUrl: string, params: PhotoRoomParams) => {
+      setPreviewUrl(null);
+      reprocessMutation.mutate({ imageUrl, params });
+    },
+    [reprocessMutation],
+  );
+
+  const handleReprocessAll = useCallback(
+    (params: PhotoRoomParams) => {
+      reprocessAllMutation.mutate(params);
+    },
+    [reprocessAllMutation],
+  );
+
+  const handleSelectImage = useCallback((img: GalleryImage) => {
+    setSelectedImageUrl((prev) => (prev === img.originalUrl ? null : img.originalUrl));
+    setPreviewUrl(null);
+  }, []);
 
   const statusBadge = product?.status ? getShopifyStatusBadge(product.status) : null;
 
@@ -209,11 +283,6 @@ export const ShopifyProductDetail: React.FC = () => {
           content: 'Regenerate AI Description',
           onAction: () => aiMutation.mutate(),
           loading: aiMutation.isPending,
-        },
-        {
-          content: 'Process images (PhotoRoom)',
-          onAction: () => photoRoomMutation.mutate(),
-          loading: photoRoomMutation.isPending,
         },
       ]}
     >
@@ -250,46 +319,29 @@ export const ShopifyProductDetail: React.FC = () => {
             </Card>
           </Layout.Section>
 
-          {/* ── Images with before/after ── */}
+          {/* ── Phase 2: Photo Gallery ── */}
           <Layout.Section>
-            <Card>
-              <BlockStack gap="400">
-                <InlineStack align="space-between">
-                  <Text variant="headingMd" as="h2">Images</Text>
-                  <Button
-                    icon={<Play className="w-4 h-4" />}
-                    onClick={() => photoRoomMutation.mutate()}
-                    loading={photoRoomMutation.isPending}
-                  >
-                    Process with PhotoRoom
-                  </Button>
-                </InlineStack>
-                <InlineStack gap="400" align="start" wrap>
-                  {(images.length > 0 ? images : [{ id: 0, src: mainImage }]).map((img, idx) => (
-                    <Card key={img.id ?? idx} padding="200">
-                      <BlockStack gap="200">
-                        <Text variant="bodySm" tone="subdued" as="p">Original</Text>
-                        <img
-                          src={img.src}
-                          alt={product.title}
-                          style={{ width: '180px', height: '180px', objectFit: 'cover', borderRadius: '8px' }}
-                        />
-                        <Text variant="bodySm" tone="subdued" as="p">PhotoRoom</Text>
-                        {processedImages[idx] ? (
-                          <img
-                            src={processedImages[idx]}
-                            alt="Processed"
-                            style={{ width: '180px', height: '180px', objectFit: 'cover', borderRadius: '8px' }}
-                          />
-                        ) : (
-                          <Text tone="subdued" as="p">Not processed yet</Text>
-                        )}
-                      </BlockStack>
-                    </Card>
-                  ))}
-                </InlineStack>
-              </BlockStack>
-            </Card>
+            <PhotoGallery
+              images={galleryImages}
+              loading={imagesLoading}
+              viewMode={galleryViewMode}
+              onViewModeChange={setGalleryViewMode}
+              onSelectImage={handleSelectImage}
+              selectedImageUrl={selectedImageUrl}
+            />
+          </Layout.Section>
+
+          {/* ── Phase 2: Photo Reprocessing Controls ── */}
+          <Layout.Section>
+            <PhotoControls
+              selectedImageUrl={selectedImageUrl}
+              onReprocess={handleReprocess}
+              onReprocessAll={handleReprocessAll}
+              reprocessing={reprocessMutation.isPending}
+              reprocessingAll={reprocessAllMutation.isPending}
+              previewUrl={previewUrl}
+              imageCount={images.length}
+            />
           </Layout.Section>
 
           {/* ── Description ── */}
@@ -321,7 +373,7 @@ export const ShopifyProductDetail: React.FC = () => {
                     dangerouslySetInnerHTML={{ __html: product.body_html }}
                   />
                 ) : (
-                  <Text tone="subdued" as="p">No AI description yet. Click “Regenerate with AI” to generate one.</Text>
+                  <Text tone="subdued" as="p">No AI description yet. Click "Regenerate with AI" to generate one.</Text>
                 )}
               </BlockStack>
             </Card>
@@ -624,7 +676,7 @@ const ShopifyProducts: React.FC = () => {
             <Text tone="subdued" as="p">
               {sorted.length === 0
                 ? 'No products match your filters'
-                : `Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, sorted.length)} of ${sorted.length}`}
+                : `Showing ${(currentPage - 1) * pageSize + 1}-${Math.min(currentPage * pageSize, sorted.length)} of ${sorted.length}`}
             </Text>
             <Pagination
               hasPrevious={currentPage > 1}

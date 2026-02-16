@@ -17,6 +17,7 @@ import pipelineRoutes from './routes/pipeline.js';
 import helpRoutes from './routes/help.js';
 import featureRoutes from './routes/features.js';
 import watcherRoutes from './routes/watcher.js';
+import imageRoutes from './routes/images.js';
 import { apiKeyAuth, rateLimit } from './middleware/auth.js';
 import { getCapabilities, getNewCapabilities } from './capabilities.js';
 
@@ -87,6 +88,7 @@ app.use(pipelineRoutes);
 app.use(helpRoutes);
 app.use(featureRoutes);
 app.use(watcherRoutes);
+app.use(imageRoutes);
 
 // --- Capabilities discovery endpoint ---
 app.get('/api/capabilities', (_req, res) => {

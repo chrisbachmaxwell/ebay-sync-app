@@ -98,6 +98,30 @@ export class PhotoRoomService {
     return Buffer.from(arrayBuffer);
   }
 
+  // ── Process with custom parameters ────────────────────────────────────
+
+  /**
+   * Process an image with caller-specified PhotoRoom parameters.
+   *
+   * Returns a base64 data URL of the processed image.
+   */
+  async processWithParams(
+    imageUrl: string,
+    params: { background?: string; padding?: number; shadow?: boolean },
+  ): Promise<{ buffer: Buffer; dataUrl: string }> {
+    const options: ProcessImageOptions = {
+      background: (params.background ?? '#FFFFFF').replace(/^#/, ''),
+      padding: params.padding ?? 0.1,
+      shadow: params.shadow ?? true,
+    };
+
+    const buffer = await this.processProductImage(imageUrl, options);
+    const base64 = buffer.toString('base64');
+    const dataUrl = `data:image/png;base64,${base64}`;
+
+    return { buffer, dataUrl };
+  }
+
   // ── Batch processing ─────────────────────────────────────────────────
 
   async processAllImages(
