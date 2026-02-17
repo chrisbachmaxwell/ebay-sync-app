@@ -149,7 +149,16 @@ router.get('/api/products/overview', async (req: Request, res: Response) => {
       }
     }
 
-    const products = shopifyProducts.map((product) => {
+    // Deduplicate products by ID (Shopify pagination can return duplicates)
+    const seenIds = new Set<string>();
+    const uniqueProducts = shopifyProducts.filter((product) => {
+      const id = String(product.id);
+      if (seenIds.has(id)) return false;
+      seenIds.add(id);
+      return true;
+    });
+
+    const products = uniqueProducts.map((product) => {
       const variant = product.variants?.[0];
       const mapping = mappingById.get(product.id);
       const pipeline = pipelineById.get(product.id);
