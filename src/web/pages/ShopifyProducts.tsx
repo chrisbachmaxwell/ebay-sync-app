@@ -37,6 +37,32 @@ import EditPhotosPanel, { type EditablePhoto } from '../components/EditPhotosPan
 import TemplateManager from '../components/TemplateManager';
 import InlineDraftApproval from '../components/InlineDraftApproval';
 
+/* ── Simple markdown → HTML for AI description preview ── */
+function mdInline(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code>$1</code>');
+}
+function markdownToHtml(md: string): string {
+  const lines = md.split('\n');
+  const html: string[] = [];
+  let inList = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) { if (inList) { html.push('</ul>'); inList = false; } continue; }
+    if (trimmed.startsWith('### ')) { if (inList) { html.push('</ul>'); inList = false; } html.push(`<h3>${mdInline(trimmed.slice(4))}</h3>`); continue; }
+    if (trimmed.startsWith('## ')) { if (inList) { html.push('</ul>'); inList = false; } html.push(`<h2>${mdInline(trimmed.slice(3))}</h2>`); continue; }
+    if (trimmed.startsWith('# ')) { if (inList) { html.push('</ul>'); inList = false; } html.push(`<h1>${mdInline(trimmed.slice(2))}</h1>`); continue; }
+    const bullet = trimmed.match(/^[-*✔✅☑●•►▸]\s*(.+)/);
+    if (bullet) { if (!inList) { html.push('<ul>'); inList = true; } html.push(`<li>${mdInline(bullet[1])}</li>`); continue; }
+    if (inList) { html.push('</ul>'); inList = false; }
+    html.push(`<p>${mdInline(trimmed)}</p>`);
+  }
+  if (inList) html.push('</ul>');
+  return html.join('\n');
+}
+
 /* ────────────────────────── helpers ────────────────────────── */
 
 const PLACEHOLDER_IMG =
@@ -608,11 +634,9 @@ export const ShopifyProductDetail: React.FC = () => {
                           background: '#f8f9fa', 
                           borderRadius: '8px',
                           border: '1px solid #e1e3e5',
-                          whiteSpace: 'pre-wrap'
                         }}
-                      >
-                        {aiDescription}
-                      </div>
+                        dangerouslySetInnerHTML={{ __html: markdownToHtml(aiDescription) }}
+                      />
                     </BlockStack>
                   ) : null}
 
