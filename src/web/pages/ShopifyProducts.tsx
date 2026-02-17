@@ -32,6 +32,7 @@ import { useAppStore } from '../store';
 import PhotoGallery, { type GalleryImage } from '../components/PhotoGallery';
 import PhotoControls, { type PhotoRoomParams } from '../components/PhotoControls';
 import TemplateManager from '../components/TemplateManager';
+import InlineDraftApproval from '../components/InlineDraftApproval';
 
 /* ────────────────────────── helpers ────────────────────────── */
 
@@ -295,6 +296,11 @@ export const ShopifyProductDetail: React.FC = () => {
 
       {product && (
         <Layout>
+          {/* ── Inline Draft Approval Banner ── */}
+          <Layout.Section>
+            <InlineDraftApproval productId={id!} />
+          </Layout.Section>
+
           <Layout.Section>
             <Card>
               <BlockStack gap="400">

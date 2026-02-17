@@ -8,6 +8,7 @@
 import { Router, type Request, type Response } from 'express';
 import {
   getDraft,
+  getDraftByProduct,
   listPendingDrafts,
   approveDraft,
   rejectDraft,
@@ -94,6 +95,41 @@ router.put('/api/drafts/settings', async (req: Request, res: Response) => {
   } catch (err) {
     logError(`[DraftsAPI] Settings update error: ${err}`);
     res.status(500).json({ error: 'Failed to update settings' });
+  }
+});
+
+// ── GET /api/drafts/product/:productId — Get pending draft for a product ───
+
+router.get('/api/drafts/product/:productId', async (req: Request, res: Response) => {
+  try {
+    const productId = req.params.productId as string;
+    if (!productId) {
+      res.status(400).json({ error: 'Product ID required' });
+      return;
+    }
+
+    const draft = await getDraftByProduct(productId);
+    if (!draft) {
+      res.json({ draft: null });
+      return;
+    }
+
+    // Fetch current live Shopify data for comparison
+    const liveContent = await checkExistingContent(draft.shopify_product_id);
+
+    res.json({
+      draft,
+      live: {
+        title: liveContent.title,
+        description: liveContent.description,
+        images: liveContent.images,
+        hasPhotos: liveContent.hasPhotos,
+        hasDescription: liveContent.hasDescription,
+      },
+    });
+  } catch (err) {
+    logError(`[DraftsAPI] Get draft by product error: ${err}`);
+    res.status(500).json({ error: 'Failed to get draft for product' });
   }
 });
 
