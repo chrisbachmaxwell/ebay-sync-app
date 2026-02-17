@@ -1394,7 +1394,7 @@ export const ShopifyProductDetail: React.FC = () => {
           src: photo.src,
         })) || []}
         ebayCategory={pipelineResult.categoryId}
-        onApply={(params) => applyChangesMutation.mutateAsync(params)}
+        onApply={(selections) => applyChangesMutation.mutateAsync(selections)}
         onSaveDraft={handleSaveDraft}
       />
     )}
