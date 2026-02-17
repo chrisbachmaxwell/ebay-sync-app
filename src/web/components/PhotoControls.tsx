@@ -36,6 +36,8 @@ interface PhotoControlsProps {
   previewUrl?: string | null;
   /** Total image count for the "Reprocess All" button */
   imageCount?: number;
+  /** Hide the action buttons (for use in EditPhotosPanel) */
+  hideActionButtons?: boolean;
 }
 
 /* ── Color presets ──────────────────────────────────────────────────── */
@@ -59,6 +61,7 @@ const PhotoControls: React.FC<PhotoControlsProps> = ({
   reprocessingAll,
   previewUrl,
   imageCount = 0,
+  hideActionButtons = false,
 }) => {
   const [background, setBackground] = useState('#FFFFFF');
   const [padding, setPadding] = useState(10); // percentage 0-50
@@ -336,31 +339,35 @@ const PhotoControls: React.FC<PhotoControlsProps> = ({
         </Box>
 
         {/* ── Action buttons ───────────────────────────────────────── */}
-        <InlineStack gap="200">
-          <Button
-            variant="primary"
-            icon={<RefreshCw size={16} />}
-            onClick={handleReprocess}
-            loading={reprocessing}
-            disabled={!selectedImageUrl || reprocessingAll}
-          >
-            {selectedImageUrl ? 'Reprocess Image' : 'Select an image first'}
-          </Button>
+        {!hideActionButtons && (
+          <>
+            <InlineStack gap="200">
+              <Button
+                variant="primary"
+                icon={<RefreshCw size={16} />}
+                onClick={handleReprocess}
+                loading={reprocessing}
+                disabled={!selectedImageUrl || reprocessingAll}
+              >
+                {selectedImageUrl ? 'Reprocess Image' : 'Select an image first'}
+              </Button>
 
-          <Button
-            icon={<RefreshCw size={16} />}
-            onClick={handleReprocessAll}
-            loading={reprocessingAll}
-            disabled={imageCount === 0 || reprocessing}
-          >
-            {`Reprocess All (${imageCount})`}
-          </Button>
-        </InlineStack>
+              <Button
+                icon={<RefreshCw size={16} />}
+                onClick={handleReprocessAll}
+                loading={reprocessingAll}
+                disabled={imageCount === 0 || reprocessing}
+              >
+                {`Reprocess All (${imageCount})`}
+              </Button>
+            </InlineStack>
 
-        {!selectedImageUrl && (
-          <Banner tone="info">
-            <p>Click an image in the gallery above to select it for individual reprocessing.</p>
-          </Banner>
+            {!selectedImageUrl && (
+              <Banner tone="info">
+                <p>Click an image in the gallery above to select it for individual reprocessing.</p>
+              </Banner>
+            )}
+          </>
         )}
       </BlockStack>
     </Card>

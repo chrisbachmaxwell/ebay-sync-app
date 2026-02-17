@@ -29,6 +29,7 @@ interface PhotoGalleryProps {
   onViewModeChange: (mode: 'side-by-side' | 'toggle') => void;
   onSelectImage?: (image: GalleryImage) => void;
   selectedImageUrl?: string | null;
+  onEditImage?: (imageUrl: string) => void;
 }
 
 const PLACEHOLDER_IMG =
@@ -181,8 +182,10 @@ const ImageCard: React.FC<{
   onOpenLightbox: () => void;
   onSelect?: () => void;
   isSelected?: boolean;
-}> = ({ image, viewMode, showProcessed, onToggle, onOpenLightbox, onSelect, isSelected }) => {
+  onEdit?: (imageUrl: string) => void;
+}> = ({ image, viewMode, showProcessed, onToggle, onOpenLightbox, onSelect, isSelected, onEdit }) => {
   const status = statusConfig[image.processingStatus] ?? statusConfig.original;
+  const [isHovered, setIsHovered] = useState(false);
 
   const imgStyle: React.CSSProperties = {
     width: '100%',
@@ -192,6 +195,43 @@ const ImageCard: React.FC<{
     cursor: 'pointer',
     border: isSelected ? '2px solid #2563eb' : '2px solid transparent',
   };
+
+  const ImageWithOverlay: React.FC<{ src: string; alt: string; onClick?: () => void }> = ({ src, alt, onClick }) => (
+    <div 
+      style={{ position: 'relative' }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <img
+        src={src || PLACEHOLDER_IMG}
+        alt={alt}
+        style={{ ...imgStyle, height: 140 }}
+        onClick={onClick}
+      />
+      {isHovered && onEdit && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            borderRadius: 6,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit(image.originalUrl);
+          }}
+        >
+          <Button size="slim" variant="primary">
+            Edit with PhotoRoom
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div
@@ -226,10 +266,9 @@ const ImageCard: React.FC<{
                 <Text variant="bodySm" tone="subdued" as="p">
                   Original
                 </Text>
-                <img
-                  src={image.originalUrl || PLACEHOLDER_IMG}
+                <ImageWithOverlay
+                  src={image.originalUrl}
                   alt="Original"
-                  style={{ ...imgStyle, height: 140 }}
                   onClick={onSelect}
                 />
               </div>
@@ -238,10 +277,9 @@ const ImageCard: React.FC<{
                   Processed
                 </Text>
                 {image.processedUrl ? (
-                  <img
+                  <ImageWithOverlay
                     src={image.processedUrl}
                     alt="Processed"
-                    style={{ ...imgStyle, height: 140 }}
                     onClick={onOpenLightbox}
                   />
                 ) : (
@@ -263,14 +301,13 @@ const ImageCard: React.FC<{
             </InlineStack>
           ) : (
             <div>
-              <img
+              <ImageWithOverlay
                 src={
                   showProcessed && image.processedUrl
                     ? image.processedUrl
-                    : image.originalUrl || PLACEHOLDER_IMG
+                    : image.originalUrl
                 }
                 alt={image.alt ?? 'Product image'}
-                style={imgStyle}
                 onClick={onSelect}
               />
               {image.processedUrl && (
@@ -297,6 +334,7 @@ const PhotoGallery: React.FC<PhotoGalleryProps> = ({
   onViewModeChange,
   onSelectImage,
   selectedImageUrl,
+  onEditImage,
 }) => {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [toggleStates, setToggleStates] = useState<Record<number, boolean>>({});
@@ -387,6 +425,7 @@ const PhotoGallery: React.FC<PhotoGalleryProps> = ({
                 onOpenLightbox={() => openLightbox(index)}
                 onSelect={() => onSelectImage?.(img)}
                 isSelected={selectedImageUrl === img.originalUrl}
+                onEdit={onEditImage}
               />
             ))}
           </div>

@@ -397,4 +397,128 @@ router.get('/api/products/:id/images/:imageId/status', async (req: Request, res:
   }
 });
 
+// ────────────────────────────────────────────────────────────────────────
+// DELETE /api/products/:productId/images/:imageId — Delete image from Shopify
+// ────────────────────────────────────────────────────────────────────────
+
+router.delete('/api/products/:productId/images/:imageId', async (req: Request, res: Response) => {
+  try {
+    const productId = Array.isArray(req.params.productId) ? req.params.productId[0] : req.params.productId;
+    const imageId = Array.isArray(req.params.imageId) ? req.params.imageId[0] : req.params.imageId;
+
+    const accessToken = await getShopifyToken();
+    if (!accessToken) {
+      res.status(400).json({ error: 'Shopify token not configured' });
+      return;
+    }
+
+    info(`[Images API] Deleting image ${imageId} from product ${productId}`);
+
+    // Delete from Shopify
+    const deleteResponse = await fetch(
+      `https://usedcameragear.myshopify.com/admin/api/2024-01/products/${productId}/images/${imageId}.json`,
+      {
+        method: 'DELETE',
+        headers: { 'X-Shopify-Access-Token': accessToken },
+      },
+    );
+
+    if (!deleteResponse.ok) {
+      const errorText = await deleteResponse.text();
+      logError(`[Images API] Shopify delete failed (${deleteResponse.status}): ${errorText}`);
+      res.status(deleteResponse.status).json({ 
+        error: 'Failed to delete image from Shopify', 
+        detail: errorText 
+      });
+      return;
+    }
+
+    // Clean up local processing log entries for this image
+    const db = await getRawDb();
+    db.prepare(
+      `DELETE FROM image_processing_log WHERE product_id = ? AND image_url LIKE ?`,
+    ).run(productId, `%${imageId}%`);
+
+    info(`[Images API] Successfully deleted image ${imageId} from product ${productId}`);
+    res.json({ ok: true, productId, imageId, deleted: true });
+  } catch (err) {
+    logError(`[Images API] Delete failed: ${err}`);
+    res.status(500).json({ error: 'Image deletion failed', detail: String(err) });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// DELETE /api/products/:productId/images — Bulk delete images from Shopify
+// Body: { imageIds: number[] }
+// ────────────────────────────────────────────────────────────────────────
+
+router.delete('/api/products/:productId/images', async (req: Request, res: Response) => {
+  try {
+    const productId = Array.isArray(req.params.productId) ? req.params.productId[0] : req.params.productId;
+    const { imageIds } = req.body;
+
+    if (!Array.isArray(imageIds) || imageIds.length === 0) {
+      res.status(400).json({ error: 'imageIds array required in request body' });
+      return;
+    }
+
+    const accessToken = await getShopifyToken();
+    if (!accessToken) {
+      res.status(400).json({ error: 'Shopify token not configured' });
+      return;
+    }
+
+    info(`[Images API] Bulk deleting ${imageIds.length} images from product ${productId}`);
+
+    const results: Array<{ id: number; success: boolean; error?: string }> = [];
+
+    // Delete each image from Shopify
+    for (const imageId of imageIds) {
+      try {
+        const deleteResponse = await fetch(
+          `https://usedcameragear.myshopify.com/admin/api/2024-01/products/${productId}/images/${imageId}.json`,
+          {
+            method: 'DELETE',
+            headers: { 'X-Shopify-Access-Token': accessToken },
+          },
+        );
+
+        if (deleteResponse.ok) {
+          results.push({ id: imageId, success: true });
+        } else {
+          const errorText = await deleteResponse.text();
+          results.push({ id: imageId, success: false, error: errorText });
+        }
+      } catch (err) {
+        results.push({ id: imageId, success: false, error: String(err) });
+      }
+    }
+
+    // Clean up local processing log entries for deleted images
+    const db = await getRawDb();
+    const successfulIds = results.filter(r => r.success).map(r => r.id);
+    for (const imageId of successfulIds) {
+      db.prepare(
+        `DELETE FROM image_processing_log WHERE product_id = ? AND image_url LIKE ?`,
+      ).run(productId, `%${imageId}%`);
+    }
+
+    const succeeded = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success).length;
+
+    info(`[Images API] Bulk delete complete: ${succeeded} succeeded, ${failed} failed`);
+    res.json({ 
+      ok: true, 
+      productId, 
+      total: imageIds.length,
+      succeeded, 
+      failed, 
+      results 
+    });
+  } catch (err) {
+    logError(`[Images API] Bulk delete failed: ${err}`);
+    res.status(500).json({ error: 'Bulk image deletion failed', detail: String(err) });
+  }
+});
+
 export default router;
