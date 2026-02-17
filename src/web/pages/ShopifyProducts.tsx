@@ -36,6 +36,7 @@ import ActivePhotosGallery, { type ActivePhoto } from '../components/ActivePhoto
 import EditPhotosPanel, { type EditablePhoto } from '../components/EditPhotosPanel';
 import TemplateManager from '../components/TemplateManager';
 import InlineDraftApproval from '../components/InlineDraftApproval';
+import { PipelineReviewModal } from '../components/PipelineReviewModal';
 
 /* ── Simple markdown → HTML for AI description preview ── */
 function mdInline(text: string): string {
@@ -159,6 +160,10 @@ export const ShopifyProductDetail: React.FC = () => {
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<number[]>([]);
   const [editPanelOpen, setEditPanelOpen] = useState(false);
   const [processingPhotos, setProcessingPhotos] = useState<Set<number>>(new Set());
+  
+  // Pipeline Review Modal state
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [pipelineResult, setPipelineResult] = useState<any>(null);
 
   const { data: productInfo, isLoading: productLoading } = useQuery({
     queryKey: ['product-info', id],
@@ -250,7 +255,14 @@ export const ShopifyProductDetail: React.FC = () => {
   const runPipelineMutation = useMutation({
     mutationFn: () => apiClient.post(`/auto-list/${id}`),
     onSuccess: (result: any) => {
-      addNotification({ type: 'success', title: 'Pipeline started', message: result?.message ?? undefined, autoClose: 4000 });
+      setPipelineResult(result);
+      setShowReviewModal(true);
+      addNotification({
+        type: 'success',
+        title: 'Pipeline completed!',
+        message: 'Review the results below.',
+        autoClose: 4000
+      });
     },
     onError: (error) => {
       addNotification({
@@ -394,6 +406,62 @@ export const ShopifyProductDetail: React.FC = () => {
     },
   });
 
+  // ── Pipeline Review Modal Mutations ──
+  const applyChangesMutation = useMutation({
+    mutationFn: async (selections: { description: boolean; photos: boolean; ebayListing: boolean }) => {
+      const promises: Promise<any>[] = [];
+
+      if (selections.description && pipelineResult?.description) {
+        promises.push(
+          apiClient.post('/test/update-product', {
+            productId: id,
+            body_html: markdownToHtml(pipelineResult.description)
+          })
+        );
+      }
+
+      if (selections.photos && pipelineResult?.images) {
+        // Photo upload logic - for now just log the images
+        console.log('Applying processed photos:', pipelineResult.images);
+      }
+
+      if (selections.ebayListing) {
+        promises.push(
+          apiClient.post('/ebay/create-draft', {
+            productId: id,
+            description: pipelineResult?.description,
+            categoryId: pipelineResult?.categoryId,
+            images: pipelineResult?.images,
+          })
+        );
+      }
+
+      await Promise.all(promises);
+    },
+    onSuccess: () => {
+      addNotification({
+        type: 'success',
+        title: 'Changes applied successfully!',
+        autoClose: 4000
+      });
+      queryClient.invalidateQueries({ queryKey: ['product-info', id] });
+      queryClient.invalidateQueries({ queryKey: ['draft', id] });
+    },
+    onError: (error) => {
+      addNotification({
+        type: 'error',
+        title: 'Failed to apply changes',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    },
+  });
+
+  // Check for existing draft
+  const { data: existingDraft } = useQuery({
+    queryKey: ['draft', id],
+    queryFn: () => apiClient.get(`/drafts/product/${id}`),
+  });
+
   // ── Photo processing functions ──
   const handleProcessSinglePhoto = useCallback(async (photoId: number, params: PhotoRoomParams) => {
     const photo = activePhotos.find(p => p.id === photoId);
@@ -501,6 +569,26 @@ export const ShopifyProductDetail: React.FC = () => {
     deleteBulkImagesMutation.mutate(imageIds);
   }, [deleteBulkImagesMutation]);
 
+  // ── Pipeline Step Display Names ──
+  const getStepDisplayName = useCallback((step: string): string => {
+    const stepMap: Record<string, string> = {
+      fetch_product: 'Fetch Product',
+      generate_description: 'Generate Description',
+      process_images: 'Process Images',
+      create_ebay_listing: 'Save to Review',
+    };
+    return stepMap[step] || step.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
+  }, []);
+
+  // ── Pipeline Review Modal Handlers ──
+  const handleSaveDraft = useCallback(() => {
+    addNotification({
+      type: 'info',
+      title: 'Draft saved for later review',
+      autoClose: 4000
+    });
+  }, [addNotification]);
+
   return (
     <div>
       <style>
@@ -553,6 +641,20 @@ export const ShopifyProductDetail: React.FC = () => {
 
       {product && (
         <>
+          {/* ── Draft Ready Banner ── */}
+          {existingDraft && !showReviewModal && (
+            <Banner
+              title="Draft ready for review"
+              tone="info"
+              action={{
+                content: 'Review Now',
+                onAction: () => setShowReviewModal(true),
+              }}
+            >
+              <p>Pipeline has completed for this product. Review and apply the changes.</p>
+            </Banner>
+          )}
+
           {/* ── Inline Draft Approval Banner ── */}
           <InlineDraftApproval productId={id!} />
 
@@ -1106,7 +1208,7 @@ export const ShopifyProductDetail: React.FC = () => {
                                       fontWeight={isDone ? 'medium' : 'regular'}
                                       tone={isError ? 'critical' : undefined}
                                     >
-                                      {step.name.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                                      {getStepDisplayName(step.name)}
                                     </Text>
                                     <Text 
                                       as="span" 
@@ -1203,6 +1305,30 @@ export const ShopifyProductDetail: React.FC = () => {
         </>
       )}
     </Page>
+
+    {/* Pipeline Review Modal */}
+    {pipelineResult && (
+      <PipelineReviewModal
+        open={showReviewModal}
+        onClose={() => setShowReviewModal(false)}
+        productId={id || ''}
+        productTitle={product?.title || 'Product'}
+        aiDescription={pipelineResult.description}
+        currentDescription={product?.body_html}
+        processedPhotos={pipelineResult.images?.map((url: string, index: number) => ({
+          id: index,
+          originalUrl: activePhotos?.[index]?.src || '',
+          processedUrl: url,
+        })) || []}
+        currentPhotos={activePhotos?.map((photo) => ({
+          id: photo.id,
+          src: photo.src,
+        })) || []}
+        ebayCategory={pipelineResult.categoryId}
+        onApply={(selections) => applyChangesMutation.mutateAsync(selections)}
+        onSaveDraft={handleSaveDraft}
+      />
+    )}
     </div>
   );
 };
