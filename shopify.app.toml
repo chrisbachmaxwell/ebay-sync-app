@@ -2,7 +2,7 @@
 
 name = "ProductPipeline"
 client_id = "2db0555e4848a8264383dc0edfcfb8fe"
-application_url = "https://product-pipeline-production.up.railway.app"
+application_url = "https://ebay-sync-app-production.up.railway.app"
 embedded = true
 
 [access_scopes]
@@ -10,7 +10,7 @@ scopes = "write_products,read_orders,write_orders,read_inventory,write_inventory
 
 [auth]
 redirect_urls = [
-  "https://product-pipeline-production.up.railway.app/auth/callback"
+  "https://ebay-sync-app-production.up.railway.app/auth/callback"
 ]
 
 [webhooks]
