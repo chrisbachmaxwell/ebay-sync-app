@@ -24,6 +24,7 @@ import { ExternalLink, Filter, Play, Search, SortAsc, SortDesc } from 'lucide-re
 import {
   SearchIcon,
   CheckCircleIcon,
+  ExternalSmallIcon,
 } from '@shopify/polaris-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -482,7 +483,7 @@ export const ShopifyProductDetail: React.FC = () => {
           ? [
               {
                 content: 'View in Shopify',
-                icon: ExternalLink,
+                icon: ExternalSmallIcon,
                 url: `https://admin.shopify.com/store/usedcameragear/products/${id}`,
                 external: true,
               },

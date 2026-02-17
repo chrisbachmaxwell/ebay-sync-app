@@ -68,6 +68,22 @@ const ShopifyNavMenu: React.FC = () => (
   </NavMenu>
 );
 
+class ErrorBoundary extends React.Component<{children: React.ReactNode}, {error: Error | null}> {
+  constructor(props: {children: React.ReactNode}) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error) { console.error('REACT ERROR BOUNDARY:', error.message, error.stack); }
+  render() {
+    if (this.state.error) {
+      return React.createElement('div', {style: {padding: '2rem', color: 'red', fontFamily: 'monospace'}},
+        React.createElement('h2', null, 'React Render Error'),
+        React.createElement('pre', {style: {whiteSpace: 'pre-wrap'}}, this.state.error.message),
+        React.createElement('pre', {style: {fontSize: '11px', whiteSpace: 'pre-wrap'}}, this.state.error.stack)
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const AppFrame: React.FC = () => {
   const location = useLocation();
   const { sidebarOpen, toggleSidebar } = useAppStore();
@@ -95,6 +111,7 @@ const AppFrame: React.FC = () => {
         showMobileNavigation={embedded ? false : !sidebarOpen}
         onNavigationDismiss={toggleSidebar}
       >
+        <ErrorBoundary>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/listings" element={<ShopifyProducts />} />
@@ -118,6 +135,7 @@ const AppFrame: React.FC = () => {
           <Route path="/features" element={<FeatureRequests />} />
           <Route path="/features/admin" element={<FeatureAdmin />} />
         </Routes>
+        </ErrorBoundary>
 
         <ChatWidget />
       </Frame>
