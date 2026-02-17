@@ -13,6 +13,13 @@ import {
   updatePipelineStep,
   setPipelineJobTitle,
 } from './pipeline-status.js';
+import {
+  createDraft,
+  checkExistingContent,
+  getAutoPublishSetting,
+  approveDraft,
+  getDraftByProduct,
+} from '../services/draft-service.js';
 
 // ---------------------------------------------------------------------------
 // OpenAI client (lazy singleton)
@@ -354,16 +361,51 @@ export async function autoListProduct(
       // Non-fatal — continue without processed images
     }
 
-    // ── Step 4: Save overrides (create_ebay_listing placeholder) ──────
+    // ── Step 4: Save to draft system (NEVER overwrite live Shopify data) ──
     await updatePipelineStep(jobId, 'create_ebay_listing', 'running');
 
+    // Save overrides for eBay listing use
     await saveProductOverride(shopifyProductId, 'listing', 'description', result.description);
     await saveProductOverride(shopifyProductId, 'listing', 'primary_category', result.ebayCategory);
 
-    await updatePipelineStep(jobId, 'create_ebay_listing', 'done', 'Overrides saved');
+    // Check what the product currently has on Shopify
+    const existingContent = await checkExistingContent(shopifyProductId);
+
+    // Create a draft with processed content + original content for comparison
+    const draftId = await createDraft(shopifyProductId, {
+      title: product.title || '',
+      description: result.description,
+      images: processedImages,
+      originalTitle: existingContent.title,
+      originalDescription: existingContent.description,
+      originalImages: existingContent.images,
+    });
+
+    // Auto-publish logic:
+    // If product has NO existing content AND auto-publish is enabled → publish directly
+    // If product HAS existing content → always save as draft, never overwrite
+    const productType = product.productType || 'default';
+    const autoPublishEnabled = await getAutoPublishSetting(productType);
+    const hasExistingContent = existingContent.hasPhotos || existingContent.hasDescription;
+
+    if (!hasExistingContent && autoPublishEnabled) {
+      info(`[AutoList] Product ${shopifyProductId} has no existing content and auto-publish is ON — publishing directly`);
+      const approveResult = await approveDraft(draftId, { photos: true, description: true });
+      if (approveResult.success) {
+        await updatePipelineStep(jobId, 'create_ebay_listing', 'done', 'Auto-published (no existing content)');
+      } else {
+        await updatePipelineStep(jobId, 'create_ebay_listing', 'done', `Draft created (#${draftId}) — auto-publish failed: ${approveResult.error}`);
+      }
+    } else {
+      const reason = hasExistingContent
+        ? 'product has existing content — requires manual review'
+        : 'auto-publish disabled for this product type';
+      await updatePipelineStep(jobId, 'create_ebay_listing', 'done', `Draft created (#${draftId}) — ${reason}`);
+      info(`[AutoList] Draft #${draftId} saved for review — ${reason}`);
+    }
 
     info(
-      `[AutoList] ✅ Product ${shopifyProductId} processed (job ${jobId}) — category=${result.ebayCategory}, description=${result.description.length} chars, images=${processedImages.length}`,
+      `[AutoList] ✅ Product ${shopifyProductId} processed (job ${jobId}) — category=${result.ebayCategory}, description=${result.description.length} chars, images=${processedImages.length}, draft=#${draftId}`,
     );
 
     return {

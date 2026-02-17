@@ -114,6 +114,32 @@ export const photoTemplates = sqliteTable('photo_templates', {
   updatedAt: text('updated_at').notNull(),
 });
 
+// ── Draft/Staging System ───────────────────────────────────────────────
+export const productDrafts = sqliteTable('product_drafts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  shopifyProductId: text('shopify_product_id').notNull(),
+  draftTitle: text('draft_title'),
+  draftDescription: text('draft_description'),
+  draftImagesJson: text('draft_images_json'),           // JSON array of processed image URLs/paths
+  originalTitle: text('original_title'),
+  originalDescription: text('original_description'),
+  originalImagesJson: text('original_images_json'),     // JSON array of original Shopify image URLs
+  status: text('status').notNull().default('pending'),  // pending, approved, rejected, partial
+  autoPublish: integer('auto_publish', { mode: 'boolean' }).default(false),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  reviewedAt: integer('reviewed_at', { mode: 'timestamp' }),
+  reviewedBy: text('reviewed_by'),
+});
+
+export const autoPublishSettings = sqliteTable('auto_publish_settings', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  productType: text('product_type').notNull().unique(),
+  enabled: integer('enabled', { mode: 'boolean' }).default(false),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+});
+
 // ── Phase 2: Image Processing Log ──────────────────────────────────────
 export const imageProcessingLog = sqliteTable('image_processing_log', {
   id: integer('id').primaryKey({ autoIncrement: true }),

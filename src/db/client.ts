@@ -117,6 +117,31 @@ const initExtraTables = (sqlite: InstanceType<typeof Database>) => {
     );
     CREATE INDEX IF NOT EXISTS idx_image_processing_log_product ON image_processing_log(product_id);
     CREATE INDEX IF NOT EXISTS idx_image_processing_log_status ON image_processing_log(status);
+    CREATE TABLE IF NOT EXISTS product_drafts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shopify_product_id TEXT NOT NULL,
+      draft_title TEXT,
+      draft_description TEXT,
+      draft_images_json TEXT,
+      original_title TEXT,
+      original_description TEXT,
+      original_images_json TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      auto_publish INTEGER DEFAULT 0,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      reviewed_at INTEGER,
+      reviewed_by TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_product_drafts_shopify_id ON product_drafts(shopify_product_id);
+    CREATE INDEX IF NOT EXISTS idx_product_drafts_status ON product_drafts(status);
+    CREATE TABLE IF NOT EXISTS auto_publish_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_type TEXT NOT NULL UNIQUE,
+      enabled INTEGER DEFAULT 0,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
     CREATE TABLE IF NOT EXISTS product_pipeline_status (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       shopify_product_id TEXT NOT NULL UNIQUE,
@@ -585,6 +610,8 @@ Rules: Professional but not stiff. Write like a knowledgeable camera store emplo
     ['photoroom_template_id', ''],
     ['pipeline_auto_descriptions', '0'],
     ['pipeline_auto_images', '0'],
+    ['draft_auto_publish_no_photos', 'false'],
+    ['draft_auto_publish_no_description', 'false'],
   ];
 
   for (const [key, value] of defaults) {

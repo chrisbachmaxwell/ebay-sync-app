@@ -23,6 +23,7 @@ import FeatureRequests from './pages/FeatureRequests';
 import FeatureAdmin from './pages/FeatureAdmin';
 import AppNavigation from './components/AppNavigation';
 import ChatWidget from './components/ChatWidget';
+import ReviewQueue from './pages/ReviewQueue';
 import { useAppStore } from './store';
 
 // Create React Query client
@@ -56,6 +57,7 @@ const ShopifyNavMenu: React.FC = () => (
     <Link to="/orders">Orders</Link>
     <Link to="/mappings">Mappings</Link>
     <Link to="/pipeline">Pipeline</Link>
+    <Link to="/review">Review Queue</Link>
     <Link to="/images">Images</Link>
     <Link to="/logs">Analytics</Link>
     <Link to="/settings">Settings</Link>
@@ -100,6 +102,7 @@ const AppFrame: React.FC = () => {
           <Route path="/orders" element={<Orders />} />
           <Route path="/mappings" element={<Mappings />} />
           <Route path="/pipeline" element={<Pipeline />} />
+          <Route path="/review" element={<ReviewQueue />} />
           <Route path="/images" element={<ImageProcessor />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/logs" element={<Analytics />} />

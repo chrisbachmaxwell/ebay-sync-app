@@ -1,0 +1,575 @@
+/**
+ * Draft Service — manages product drafts for the staging/review system.
+ *
+ * CRITICAL: The pipeline must NEVER overwrite live Shopify product data automatically.
+ * All processed content goes through the draft system first.
+ */
+
+import { getRawDb } from '../db/client.js';
+import { info, warn, error as logError } from '../utils/logger.js';
+import { loadShopifyCredentials } from '../config/credentials.js';
+
+// ── Types ──────────────────────────────────────────────────────────────
+
+export interface Draft {
+  id: number;
+  shopify_product_id: string;
+  draft_title: string | null;
+  draft_description: string | null;
+  draft_images_json: string | null;
+  original_title: string | null;
+  original_description: string | null;
+  original_images_json: string | null;
+  status: 'pending' | 'approved' | 'rejected' | 'partial';
+  auto_publish: number;
+  created_at: number;
+  updated_at: number;
+  reviewed_at: number | null;
+  reviewed_by: string | null;
+}
+
+export interface DraftWithParsed extends Draft {
+  draftImages: string[];
+  originalImages: string[];
+}
+
+export interface CreateDraftInput {
+  title?: string;
+  description?: string;
+  images?: string[];
+  originalTitle?: string;
+  originalDescription?: string;
+  originalImages?: string[];
+}
+
+export interface ApproveOptions {
+  photos: boolean;
+  description: boolean;
+}
+
+// ── Core CRUD ──────────────────────────────────────────────────────────
+
+/**
+ * Create a draft for a Shopify product. If a pending draft already exists
+ * for this product, it will be updated instead.
+ */
+export async function createDraft(
+  shopifyProductId: string,
+  input: CreateDraftInput,
+): Promise<number> {
+  const db = await getRawDb();
+  const now = Math.floor(Date.now() / 1000);
+
+  // Check for existing pending draft
+  const existing = db.prepare(
+    `SELECT id FROM product_drafts WHERE shopify_product_id = ? AND status = 'pending'`,
+  ).get(shopifyProductId) as { id: number } | undefined;
+
+  if (existing) {
+    // Update existing draft
+    db.prepare(
+      `UPDATE product_drafts SET
+        draft_title = COALESCE(?, draft_title),
+        draft_description = COALESCE(?, draft_description),
+        draft_images_json = COALESCE(?, draft_images_json),
+        original_title = COALESCE(?, original_title),
+        original_description = COALESCE(?, original_description),
+        original_images_json = COALESCE(?, original_images_json),
+        updated_at = ?
+      WHERE id = ?`,
+    ).run(
+      input.title ?? null,
+      input.description ?? null,
+      input.images ? JSON.stringify(input.images) : null,
+      input.originalTitle ?? null,
+      input.originalDescription ?? null,
+      input.originalImages ? JSON.stringify(input.originalImages) : null,
+      now,
+      existing.id,
+    );
+    info(`[DraftService] Updated existing draft ${existing.id} for product ${shopifyProductId}`);
+    return existing.id;
+  }
+
+  // Create new draft
+  const result = db.prepare(
+    `INSERT INTO product_drafts
+      (shopify_product_id, draft_title, draft_description, draft_images_json,
+       original_title, original_description, original_images_json,
+       status, auto_publish, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+  ).run(
+    shopifyProductId,
+    input.title ?? null,
+    input.description ?? null,
+    input.images ? JSON.stringify(input.images) : null,
+    input.originalTitle ?? null,
+    input.originalDescription ?? null,
+    input.originalImages ? JSON.stringify(input.originalImages) : null,
+    now,
+    now,
+  );
+
+  const draftId = Number(result.lastInsertRowid);
+  info(`[DraftService] Created draft ${draftId} for product ${shopifyProductId}`);
+  return draftId;
+}
+
+/**
+ * Get a single draft by ID.
+ */
+export async function getDraft(draftId: number): Promise<DraftWithParsed | null> {
+  const db = await getRawDb();
+  const row = db.prepare(`SELECT * FROM product_drafts WHERE id = ?`).get(draftId) as Draft | undefined;
+  if (!row) return null;
+  return parseDraft(row);
+}
+
+/**
+ * Get the pending draft for a specific Shopify product.
+ */
+export async function getDraftByProduct(shopifyProductId: string): Promise<DraftWithParsed | null> {
+  const db = await getRawDb();
+  const row = db.prepare(
+    `SELECT * FROM product_drafts WHERE shopify_product_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1`,
+  ).get(shopifyProductId) as Draft | undefined;
+  if (!row) return null;
+  return parseDraft(row);
+}
+
+/**
+ * List all pending drafts (for the review queue).
+ */
+export async function listPendingDrafts(options?: {
+  status?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ data: DraftWithParsed[]; total: number }> {
+  const db = await getRawDb();
+  const status = options?.status || 'pending';
+  const limit = Math.min(options?.limit || 50, 200);
+  const offset = options?.offset || 0;
+
+  let whereClause = '';
+  const params: any[] = [];
+
+  if (status === 'all') {
+    whereClause = '1=1';
+  } else {
+    whereClause = 'status = ?';
+    params.push(status);
+  }
+
+  const total = db.prepare(
+    `SELECT COUNT(*) as count FROM product_drafts WHERE ${whereClause}`,
+  ).get(...params) as { count: number };
+
+  const rows = db.prepare(
+    `SELECT * FROM product_drafts WHERE ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+  ).all(...params, limit, offset) as Draft[];
+
+  return {
+    data: rows.map(parseDraft),
+    total: total.count,
+  };
+}
+
+/**
+ * Approve a draft and push selected content to Shopify.
+ *
+ * CRITICAL: Only pushes content explicitly approved. Never overwrites anything
+ * without explicit user action.
+ */
+export async function approveDraft(
+  draftId: number,
+  options: ApproveOptions,
+): Promise<{ success: boolean; error?: string }> {
+  const db = await getRawDb();
+  const draft = db.prepare(`SELECT * FROM product_drafts WHERE id = ?`).get(draftId) as Draft | undefined;
+
+  if (!draft) {
+    return { success: false, error: 'Draft not found' };
+  }
+
+  if (draft.status !== 'pending') {
+    return { success: false, error: `Draft is already ${draft.status}` };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+
+  try {
+    // Get Shopify token
+    const tokenRow = db.prepare(
+      `SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`,
+    ).get() as { access_token: string } | undefined;
+
+    if (!tokenRow?.access_token) {
+      return { success: false, error: 'Shopify token not found' };
+    }
+
+    const creds = await loadShopifyCredentials();
+    const updates: Record<string, any> = {};
+
+    if (options.description && draft.draft_title) {
+      updates.title = draft.draft_title;
+    }
+    if (options.description && draft.draft_description) {
+      updates.body_html = draft.draft_description;
+    }
+
+    // Push product field updates to Shopify
+    if (Object.keys(updates).length > 0) {
+      const url = `https://${creds.storeDomain}/admin/api/2024-01/products/${draft.shopify_product_id}.json`;
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Access-Token': tokenRow.access_token,
+        },
+        body: JSON.stringify({ product: { id: draft.shopify_product_id, ...updates } }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        logError(`[DraftService] Failed to update Shopify product: ${response.status} — ${text}`);
+        return { success: false, error: `Shopify API error: ${response.status}` };
+      }
+
+      info(`[DraftService] ✅ Pushed description/title to Shopify product ${draft.shopify_product_id}`);
+    }
+
+    // Push images to Shopify
+    if (options.photos && draft.draft_images_json) {
+      const images: string[] = JSON.parse(draft.draft_images_json);
+      if (images.length > 0) {
+        const uploadResult = await uploadDraftImagesToShopify(
+          tokenRow.access_token,
+          creds.storeDomain,
+          draft.shopify_product_id,
+          images,
+        );
+        info(`[DraftService] ✅ Uploaded ${uploadResult.uploaded} images to Shopify product ${draft.shopify_product_id}`);
+      }
+    }
+
+    // Determine final status
+    const newStatus = (options.photos && options.description) ? 'approved' : 'partial';
+
+    db.prepare(
+      `UPDATE product_drafts SET status = ?, reviewed_at = ?, reviewed_by = 'admin', updated_at = ? WHERE id = ?`,
+    ).run(newStatus, now, now, draftId);
+
+    info(`[DraftService] Draft ${draftId} ${newStatus} for product ${draft.shopify_product_id}`);
+    return { success: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logError(`[DraftService] Approve error for draft ${draftId}: ${msg}`);
+    return { success: false, error: msg };
+  }
+}
+
+/**
+ * Reject a draft.
+ */
+export async function rejectDraft(draftId: number): Promise<{ success: boolean; error?: string }> {
+  const db = await getRawDb();
+  const now = Math.floor(Date.now() / 1000);
+
+  const draft = db.prepare(`SELECT id, status FROM product_drafts WHERE id = ?`).get(draftId) as { id: number; status: string } | undefined;
+  if (!draft) return { success: false, error: 'Draft not found' };
+  if (draft.status !== 'pending') return { success: false, error: `Draft is already ${draft.status}` };
+
+  db.prepare(
+    `UPDATE product_drafts SET status = 'rejected', reviewed_at = ?, reviewed_by = 'admin', updated_at = ? WHERE id = ?`,
+  ).run(now, now, draftId);
+
+  info(`[DraftService] Draft ${draftId} rejected`);
+  return { success: true };
+}
+
+/**
+ * Update a draft's content before approving.
+ */
+export async function updateDraft(
+  draftId: number,
+  changes: Partial<CreateDraftInput>,
+): Promise<{ success: boolean; error?: string }> {
+  const db = await getRawDb();
+  const now = Math.floor(Date.now() / 1000);
+
+  const draft = db.prepare(`SELECT id, status FROM product_drafts WHERE id = ?`).get(draftId) as { id: number; status: string } | undefined;
+  if (!draft) return { success: false, error: 'Draft not found' };
+  if (draft.status !== 'pending') return { success: false, error: `Cannot edit ${draft.status} draft` };
+
+  const sets: string[] = ['updated_at = ?'];
+  const params: any[] = [now];
+
+  if (changes.title !== undefined) {
+    sets.push('draft_title = ?');
+    params.push(changes.title);
+  }
+  if (changes.description !== undefined) {
+    sets.push('draft_description = ?');
+    params.push(changes.description);
+  }
+  if (changes.images !== undefined) {
+    sets.push('draft_images_json = ?');
+    params.push(JSON.stringify(changes.images));
+  }
+
+  params.push(draftId);
+  db.prepare(`UPDATE product_drafts SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+
+  info(`[DraftService] Draft ${draftId} updated`);
+  return { success: true };
+}
+
+/**
+ * Get the pending draft count (for navigation badge).
+ */
+export async function getPendingDraftCount(): Promise<number> {
+  const db = await getRawDb();
+  const row = db.prepare(
+    `SELECT COUNT(*) as count FROM product_drafts WHERE status = 'pending'`,
+  ).get() as { count: number };
+  return row.count;
+}
+
+// ── Auto-Publish Settings ──────────────────────────────────────────────
+
+/**
+ * Check if a product type has auto-publish enabled.
+ */
+export async function getAutoPublishSetting(productType: string): Promise<boolean> {
+  const db = await getRawDb();
+
+  // Check global settings first
+  const noPhotosAuto = db.prepare(
+    `SELECT value FROM settings WHERE key = 'draft_auto_publish_no_photos'`,
+  ).get() as { value: string } | undefined;
+
+  const noDescAuto = db.prepare(
+    `SELECT value FROM settings WHERE key = 'draft_auto_publish_no_description'`,
+  ).get() as { value: string } | undefined;
+
+  // Check per-type setting
+  const typeSetting = db.prepare(
+    `SELECT enabled FROM auto_publish_settings WHERE product_type = ?`,
+  ).get(productType) as { enabled: number } | undefined;
+
+  return typeSetting?.enabled === 1;
+}
+
+/**
+ * Toggle auto-publish for a product type.
+ */
+export async function setAutoPublishSetting(productType: string, enabled: boolean): Promise<void> {
+  const db = await getRawDb();
+  const now = Math.floor(Date.now() / 1000);
+
+  db.prepare(
+    `INSERT INTO auto_publish_settings (product_type, enabled, created_at, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(product_type) DO UPDATE SET enabled = ?, updated_at = ?`,
+  ).run(productType, enabled ? 1 : 0, now, now, enabled ? 1 : 0, now);
+
+  info(`[DraftService] Auto-publish for "${productType}" set to ${enabled}`);
+}
+
+/**
+ * Get all auto-publish settings.
+ */
+export async function getAllAutoPublishSettings(): Promise<{
+  perType: Array<{ product_type: string; enabled: boolean }>;
+  global: {
+    autoPublishNoPhotos: boolean;
+    autoPublishNoDescription: boolean;
+  };
+}> {
+  const db = await getRawDb();
+
+  const typeSettings = db.prepare(`SELECT * FROM auto_publish_settings`).all() as Array<{
+    product_type: string;
+    enabled: number;
+  }>;
+
+  const noPhotos = db.prepare(
+    `SELECT value FROM settings WHERE key = 'draft_auto_publish_no_photos'`,
+  ).get() as { value: string } | undefined;
+
+  const noDesc = db.prepare(
+    `SELECT value FROM settings WHERE key = 'draft_auto_publish_no_description'`,
+  ).get() as { value: string } | undefined;
+
+  return {
+    perType: typeSettings.map((t) => ({
+      product_type: t.product_type,
+      enabled: t.enabled === 1,
+    })),
+    global: {
+      autoPublishNoPhotos: noPhotos?.value === 'true',
+      autoPublishNoDescription: noDesc?.value === 'true',
+    },
+  };
+}
+
+/**
+ * Update global auto-publish settings.
+ */
+export async function updateGlobalAutoPublishSettings(settings: {
+  autoPublishNoPhotos?: boolean;
+  autoPublishNoDescription?: boolean;
+}): Promise<void> {
+  const db = await getRawDb();
+
+  if (settings.autoPublishNoPhotos !== undefined) {
+    db.prepare(
+      `INSERT INTO settings (key, value, updatedAt) VALUES ('draft_auto_publish_no_photos', ?, datetime('now'))
+       ON CONFLICT(key) DO UPDATE SET value = ?, updatedAt = datetime('now')`,
+    ).run(String(settings.autoPublishNoPhotos), String(settings.autoPublishNoPhotos));
+  }
+
+  if (settings.autoPublishNoDescription !== undefined) {
+    db.prepare(
+      `INSERT INTO settings (key, value, updatedAt) VALUES ('draft_auto_publish_no_description', ?, datetime('now'))
+       ON CONFLICT(key) DO UPDATE SET value = ?, updatedAt = datetime('now')`,
+    ).run(String(settings.autoPublishNoDescription), String(settings.autoPublishNoDescription));
+  }
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────
+
+function parseDraft(row: Draft): DraftWithParsed {
+  return {
+    ...row,
+    draftImages: row.draft_images_json ? JSON.parse(row.draft_images_json) : [],
+    originalImages: row.original_images_json ? JSON.parse(row.original_images_json) : [],
+  };
+}
+
+/**
+ * Upload draft images to Shopify product.
+ * Supports both local file paths and URLs.
+ */
+async function uploadDraftImagesToShopify(
+  accessToken: string,
+  storeDomain: string,
+  productId: string,
+  images: string[],
+): Promise<{ uploaded: number; failed: number }> {
+  let uploaded = 0;
+  let failed = 0;
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i];
+    try {
+      let body: Record<string, any>;
+
+      if (img.startsWith('http://') || img.startsWith('https://')) {
+        // URL-based image
+        body = {
+          image: {
+            src: img,
+            position: i + 1,
+          },
+        };
+      } else {
+        // Local file — base64 encode
+        if (!fs.existsSync(img)) {
+          warn(`[DraftService] Image file not found: ${img}`);
+          failed++;
+          continue;
+        }
+        const base64 = fs.readFileSync(img).toString('base64');
+        body = {
+          image: {
+            attachment: base64,
+            filename: path.basename(img),
+            position: i + 1,
+          },
+        };
+      }
+
+      const url = `https://${storeDomain}/admin/api/2024-01/products/${productId}/images.json`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Access-Token': accessToken,
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (response.ok) {
+        uploaded++;
+      } else {
+        const text = await response.text();
+        warn(`[DraftService] Image upload failed: ${response.status} — ${text}`);
+        failed++;
+      }
+
+      // Rate limit: ~2 req/sec for Shopify REST
+      if (i < images.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      }
+    } catch (err) {
+      logError(`[DraftService] Image upload error: ${err}`);
+      failed++;
+    }
+  }
+
+  return { uploaded, failed };
+}
+
+/**
+ * Check if a Shopify product has existing content (photos and/or description).
+ */
+export async function checkExistingContent(
+  shopifyProductId: string,
+): Promise<{ hasPhotos: boolean; hasDescription: boolean; title: string; description: string; images: string[] }> {
+  const db = await getRawDb();
+  const tokenRow = db.prepare(
+    `SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`,
+  ).get() as { access_token: string } | undefined;
+
+  if (!tokenRow?.access_token) {
+    return { hasPhotos: false, hasDescription: false, title: '', description: '', images: [] };
+  }
+
+  try {
+    const creds = await loadShopifyCredentials();
+    const url = `https://${creds.storeDomain}/admin/api/2024-01/products/${shopifyProductId}.json?fields=id,title,body_html,images`;
+    const response = await fetch(url, {
+      headers: { 'X-Shopify-Access-Token': tokenRow.access_token },
+    });
+
+    if (!response.ok) {
+      return { hasPhotos: false, hasDescription: false, title: '', description: '', images: [] };
+    }
+
+    const data = (await response.json()) as {
+      product: {
+        title: string;
+        body_html: string | null;
+        images: Array<{ src: string }>;
+      };
+    };
+
+    const product = data.product;
+    const description = product.body_html || '';
+    const images = (product.images || []).map((img) => img.src);
+
+    return {
+      hasPhotos: images.length > 0,
+      hasDescription: description.trim().length > 0,
+      title: product.title || '',
+      description,
+      images,
+    };
+  } catch (err) {
+    warn(`[DraftService] Failed to check existing content for ${shopifyProductId}: ${err}`);
+    return { hasPhotos: false, hasDescription: false, title: '', description: '', images: [] };
+  }
+}

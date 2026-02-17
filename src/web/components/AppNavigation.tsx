@@ -1,6 +1,8 @@
 import React from 'react';
 import { Navigation } from '@shopify/polaris';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { apiClient } from '../hooks/useApi';
 import {
   Home,
   Package,
@@ -20,6 +22,12 @@ const AppNavigation: React.FC = () => {
 
   const isSelected = (path: string) => location.pathname === path;
   const isInSection = (paths: string[]) => paths.some((p) => location.pathname.startsWith(p));
+
+  const { data: draftCount } = useQuery({
+    queryKey: ['drafts-count'],
+    queryFn: () => apiClient.get<{ count: number }>('/drafts/count'),
+    refetchInterval: 15000,
+  });
 
   return (
     <Navigation location={location.pathname}>
@@ -88,6 +96,14 @@ const AppNavigation: React.FC = () => {
             selected: isSelected('/pipeline'),
             onClick: () => navigate('/pipeline'),
             url: '/pipeline',
+          },
+          {
+            label: 'Review Queue',
+            icon: undefined,
+            selected: isSelected('/review'),
+            onClick: () => navigate('/review'),
+            url: '/review',
+            badge: draftCount?.count ? String(draftCount.count) : undefined,
           },
           {
             label: 'Images',

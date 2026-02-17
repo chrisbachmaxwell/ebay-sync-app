@@ -36,6 +36,12 @@ import {
 import { searchShopifyProduct } from './shopify-matcher.js';
 import { uploadImagesToShopify } from './shopify-uploader.js';
 import { getDefaultForCategory, type PhotoTemplate } from '../services/photo-templates.js';
+import {
+  createDraft,
+  checkExistingContent,
+  getAutoPublishSetting,
+  approveDraft,
+} from '../services/draft-service.js';
 
 // ── Configuration ──────────────────────────────────────────────────────
 
@@ -414,19 +420,53 @@ async function handleNewFolder(
     info(`[Watcher] Matched to Shopify product: ${match.title} (ID: ${match.id}, confidence: ${match.confidence})`);
     await updateMatch(recordId, match.id, match.title, match.confidence);
 
-    // Upload images to Shopify
+    // Save images to draft system instead of uploading directly to Shopify.
+    // CRITICAL: Never overwrite live Shopify product data automatically.
     await updateUploading(recordId);
-    const uploadResult = await uploadImagesToShopify(match.id, imagePaths);
 
-    if (uploadResult.uploaded > 0) {
-      await updateDone(recordId, uploadResult.uploaded);
-      info(`[Watcher] ✅ Done: ${folderName} → ${match.title} (${uploadResult.uploaded} images uploaded)`);
+    try {
+      // Check existing content on Shopify
+      const existingContent = await checkExistingContent(match.id);
 
-      // Phase 3: Auto-apply default template for this category
+      // Create a draft with the local image paths
+      const draftId = await createDraft(match.id, {
+        title: match.title,
+        images: imagePaths,
+        originalTitle: existingContent.title,
+        originalDescription: existingContent.description,
+        originalImages: existingContent.images,
+      });
+
+      info(`[Watcher] Draft #${draftId} created for ${folderName} → ${match.title} (${imagePaths.length} images)`);
+
+      // Auto-publish if product has no existing photos and auto-publish is enabled
+      const autoPublishEnabled = await getAutoPublishSetting(presetName);
+      const hasExistingContent = existingContent.hasPhotos || existingContent.hasDescription;
+
+      if (!hasExistingContent && autoPublishEnabled) {
+        info(`[Watcher] Auto-publishing draft #${draftId} — no existing content`);
+        const approveResult = await approveDraft(draftId, { photos: true, description: false });
+        if (approveResult.success) {
+          await updateDone(recordId, imagePaths.length);
+          info(`[Watcher] ✅ Done: ${folderName} → ${match.title} (auto-published ${imagePaths.length} images)`);
+        } else {
+          await updateDone(recordId, imagePaths.length);
+          warn(`[Watcher] Draft saved but auto-publish failed: ${approveResult.error}`);
+        }
+      } else {
+        await updateDone(recordId, imagePaths.length);
+        const reason = hasExistingContent
+          ? 'product has existing content — draft awaiting review'
+          : 'auto-publish disabled — draft awaiting review';
+        info(`[Watcher] ✅ Done: ${folderName} → ${match.title} (${reason})`);
+      }
+
+      // Phase 3: Auto-apply default template for this category (process images in background)
       await autoApplyTemplate(presetName, match.id);
-    } else {
-      await updateError(recordId, `All ${uploadResult.failed} image uploads failed`);
-      logError(`[Watcher] ❌ All uploads failed for ${folderName}`);
+    } catch (draftErr) {
+      // Fallback: if draft system fails, log the error
+      await updateError(recordId, `Draft creation failed: ${String(draftErr)}`);
+      logError(`[Watcher] ❌ Draft creation failed for ${folderName}: ${draftErr}`);
     }
   } catch (err) {
     logError(`[Watcher] Pipeline error for ${folderName}: ${err}`);
