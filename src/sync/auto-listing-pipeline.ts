@@ -68,29 +68,33 @@ const DEFAULT_DESCRIPTION_PROMPT = `You are a professional copywriter for usedca
 
 Format your output as follows:
 
-**Title line:** {Product Name} USED — [Catchy 6-8 word tagline highlighting the #1 selling point]
+{Product Name} USED — [Catchy 6-8 word tagline highlighting the #1 selling point]
 
-**Intro:** 2-3 sentences. Lead with what makes this product special. Reference real-world use cases. Mention original retail price if commonly known.
+2-3 sentences. Lead with what makes this product special. Reference real-world use cases. Mention original retail price if commonly known.
 
-**Key Features:** 4-6 bullet points using ✔ emoji. Include:
-- Exact lens mount or body mount (Sony E, Nikon Z, Canon RF, Fuji X, etc.)
-- Specific technical specs (focal length, aperture, sensor, AF system)
-- Compatible camera bodies when relevant
+Key Features:
+✔ Exact lens mount or body mount (Sony E, Nikon Z, Canon RF, Fuji X, etc.)
+✔ Specific technical specs (focal length, aperture, sensor, AF system)
+✔ Compatible camera bodies when relevant
+✔ [Additional key features - 4-6 bullet points total]
 
-**Condition: {Grade}**
+Condition: {Grade}
 Map grades: Mint = virtually new. Like New Minus = near-perfect, faintest marks. Excellent Plus = light use, minor cosmetic marks, pristine optics. Excellent = normal wear, all functions perfect. Good Plus = visible wear, fully functional.
 Always confirm: optics clean, no haze/fungus/scratches (unless told otherwise).
 
-**Who Is It For?** 1-2 sentences targeting a specific photographer type. Be specific, not generic.
+Who Is It For?
+1-2 sentences targeting a specific photographer type. Be specific, not generic.
 
-**Includes:** List accessories provided. Note missing standard items if known.
+What's Included:
+List accessories provided. Note missing standard items if known.
 
 Rules:
 - Professional, authoritative, enthusiastic but not salesy
 - Write like a knowledgeable camera store employee
 - Use bold text and ✔ bullets for scannability
 - No HTML unless requested. No invented specs.
-- No superlatives without substance.`;
+- No superlatives without substance.
+- Output clean, ready-to-publish descriptions without "Title line:" or "Intro:" labels`;
 
 async function getDescriptionPrompt(): Promise<string> {
   try {

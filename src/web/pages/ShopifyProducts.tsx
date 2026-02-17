@@ -45,7 +45,14 @@ function mdInline(text: string): string {
     .replace(/`(.+?)`/g, '<code>$1</code>');
 }
 function markdownToHtml(md: string): string {
-  const lines = md.split('\n');
+  // Strip unwanted labels from AI output
+  const cleaned = md
+    .replace(/^\*\*Title line:\*\*\s*/gm, '')
+    .replace(/^Title line:\s*/gm, '')
+    .replace(/^\*\*Intro:\*\*\s*/gm, '')
+    .replace(/^Intro:\s*/gm, '');
+  
+  const lines = cleaned.split('\n');
   const html: string[] = [];
   let inList = false;
   for (const line of lines) {

@@ -102,8 +102,9 @@ export class PhotoRoomService {
 
   /**
    * Process an image with caller-specified PhotoRoom parameters.
+   * Applies background removal, padding, shadow, AND template overlay.
    *
-   * Returns a base64 data URL of the processed image.
+   * Returns a base64 data URL of the final processed image.
    */
   async processWithParams(
     imageUrl: string,
@@ -115,11 +116,27 @@ export class PhotoRoomService {
       shadow: params.shadow ?? true,
     };
 
-    const buffer = await this.processProductImage(imageUrl, options);
-    const base64 = buffer.toString('base64');
-    const dataUrl = `data:image/png;base64,${base64}`;
-
-    return { buffer, dataUrl };
+    // Step 1: Process image (background removal + padding + shadow)
+    const processedBuffer = await this.processProductImage(imageUrl, options);
+    
+    // Step 2: Convert buffer to data URL and use as input for template rendering
+    const base64 = processedBuffer.toString('base64');
+    const processedDataUrl = `data:image/png;base64,${base64}`;
+    
+    try {
+      // Step 3: Apply PhotoRoom template overlay to the processed image
+      info(`[PhotoRoom] Applying template overlay to processed image`);
+      const templateBuffer = await this.renderWithTemplate(processedDataUrl);
+      
+      const templateBase64 = templateBuffer.toString('base64');
+      const finalDataUrl = `data:image/png;base64,${templateBase64}`;
+      
+      return { buffer: templateBuffer, dataUrl: finalDataUrl };
+    } catch (templateError) {
+      warn(`[PhotoRoom] Template overlay failed, returning processed image without template: ${templateError}`);
+      // Fall back to processed image without template if template rendering fails
+      return { buffer: processedBuffer, dataUrl: processedDataUrl };
+    }
   }
 
   // ── Batch processing ─────────────────────────────────────────────────

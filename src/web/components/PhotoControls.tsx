@@ -28,6 +28,8 @@ interface PhotoControlsProps {
   onReprocess: (imageUrl: string, params: PhotoRoomParams) => void;
   /** Callback when user clicks "Reprocess All" */
   onReprocessAll: (params: PhotoRoomParams) => void;
+  /** Callback when parameters change (real-time updates) */
+  onParamsChange?: (params: PhotoRoomParams) => void;
   /** Whether a single reprocess is in progress */
   reprocessing?: boolean;
   /** Whether a bulk reprocess is in progress */
@@ -57,6 +59,7 @@ const PhotoControls: React.FC<PhotoControlsProps> = ({
   selectedImageUrl,
   onReprocess,
   onReprocessAll,
+  onParamsChange,
   reprocessing,
   reprocessingAll,
   previewUrl,
@@ -76,6 +79,13 @@ const PhotoControls: React.FC<PhotoControlsProps> = ({
       shadow,
     };
   }, [background, padding, shadow]);
+
+  // Notify parent about parameter changes
+  useEffect(() => {
+    if (onParamsChange) {
+      onParamsChange(getParams());
+    }
+  }, [onParamsChange, getParams]);
 
   const handleReprocess = useCallback(() => {
     if (selectedImageUrl) {

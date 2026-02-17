@@ -134,6 +134,7 @@ const EditPhotosPanel: React.FC<EditPhotosPanelProps> = ({
                 setParams(params);
               }}
               onReprocessAll={(params) => setParams(params)}
+              onParamsChange={(params) => setParams(params)} // Real-time param updates
               reprocessing={false}
               reprocessingAll={processing}
               imageCount={allPhotosCount}
