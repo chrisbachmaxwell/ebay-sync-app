@@ -62,9 +62,25 @@ export async function processNewProduct(
     // Notes are optional — continue without them
   }
 
+  // Look up TIM condition data for the product
+  let timConditionText = '';
+  try {
+    const { findTimItemForProduct, formatConditionForPrompt } = await import('../services/tim-matching.js');
+    const variants = shopifyProduct.variants ?? [];
+    const skus = variants.map((v: any) => v.sku).filter(Boolean);
+    const timData = await findTimItemForProduct(skus);
+    if (timData) {
+      timConditionText = formatConditionForPrompt(timData);
+      info(`[AutoList] Found TIM condition for ${title}: ${timData.condition ?? 'ungraded'}`);
+    }
+  } catch (err) {
+    // TIM lookup is optional — continue without it
+    logError(`[AutoList] TIM lookup failed (non-fatal): ${err}`);
+  }
+
   // Run description and category generation in parallel
   const [descriptionResult, categoryResult] = await Promise.all([
-    generateDescription(openai, title, vendor, productNotes),
+    generateDescription(openai, title, vendor, productNotes, timConditionText),
     suggestCategory(openai, title, vendor),
   ]);
 
@@ -126,11 +142,16 @@ async function generateDescription(
   title: string,
   vendor: string,
   productNotes?: string,
+  timConditionText?: string,
 ): Promise<string> {
   try {
     const systemPrompt = await getDescriptionPrompt();
 
     let userContent = `Product: ${title}\nBrand: ${vendor}\nCondition: Used — Excellent Plus (assume unless specified otherwise)\nCategory: Auto-detect from product name\nIncluded accessories: Standard items for this product (caps, hood, etc. — assume typical unless specified)`;
+
+    if (timConditionText?.trim()) {
+      userContent += `\n\n${timConditionText.trim()}`;
+    }
 
     if (productNotes?.trim()) {
       userContent += `\n\nProduct condition notes (MUST be mentioned in the description): ${productNotes.trim()}`;

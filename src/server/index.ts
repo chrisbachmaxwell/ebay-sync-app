@@ -21,6 +21,7 @@ import imageRoutes from './routes/images.js';
 import templateRoutes from './routes/templates.js';
 import draftRoutes from './routes/drafts.js';
 import ebayOrderRoutes from './routes/ebay-orders.js';
+import timRoutes from './routes/tim.js';
 import { apiKeyAuth, rateLimit } from './middleware/auth.js';
 import { getCapabilities, getNewCapabilities } from './capabilities.js';
 import { initPhotoTemplatesTable } from '../services/photo-templates.js';
@@ -96,6 +97,7 @@ app.use(imageRoutes);
 app.use(templateRoutes);
 app.use(draftRoutes);
 app.use(ebayOrderRoutes);
+app.use(timRoutes);
 
 // --- Capabilities discovery endpoint ---
 app.get('/api/capabilities', (_req, res) => {

@@ -28,7 +28,7 @@ import {
 } from '@shopify/polaris-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import { apiClient, useListings, useProductNotes, useSaveProductNotes } from '../hooks/useApi';
+import { apiClient, useListings, useProductNotes, useSaveProductNotes, useTimCondition } from '../hooks/useApi';
 import { useAppStore } from '../store';
 import PhotoGallery, { type GalleryImage } from '../components/PhotoGallery';
 import PhotoControls, { type PhotoRoomParams } from '../components/PhotoControls';
@@ -164,6 +164,9 @@ export const ShopifyProductDetail: React.FC = () => {
   // Pipeline Review Modal state
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [pipelineResult, setPipelineResult] = useState<any>(null);
+
+  // TIM Condition data
+  const { data: timData, isLoading: timLoading } = useTimCondition(id);
 
   // Product Notes state
   const { data: notesData } = useProductNotes(id);
@@ -1128,6 +1131,67 @@ export const ShopifyProductDetail: React.FC = () => {
                         </BlockStack>
                       )}
                     </BlockStack>
+                  </BlockStack>
+                </Card>
+
+                {/* ── TIM Condition ── */}
+                <Card>
+                  <BlockStack gap="400">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text variant="headingMd" as="h2">TIM Condition</Text>
+                      {timData?.match?.condition && (
+                        <Badge tone={
+                          timData.match.condition === 'like_new_minus' || timData.match.condition === 'excellent_plus' ? 'success' :
+                          timData.match.condition === 'excellent' ? 'success' :
+                          timData.match.condition === 'poor' || timData.match.condition === 'ugly' ? 'warning' : 'info'
+                        }>
+                          {timData.match.condition.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                        </Badge>
+                      )}
+                    </InlineStack>
+                    <Divider />
+                    {timLoading ? (
+                      <Spinner size="small" />
+                    ) : timData?.match ? (
+                      <BlockStack gap="300">
+                        {timData.match.condition && (
+                          <InlineStack align="space-between">
+                            <Text variant="bodyMd" tone="subdued" as="span">Grade</Text>
+                            <Text variant="bodyMd" fontWeight="medium" as="span">
+                              {timData.match.condition.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                            </Text>
+                          </InlineStack>
+                        )}
+                        {timData.match.conditionNotes && (
+                          <BlockStack gap="100">
+                            <Text variant="bodyMd" tone="subdued" as="span">Condition Notes</Text>
+                            <Text variant="bodyMd" as="p">{timData.match.conditionNotes}</Text>
+                          </BlockStack>
+                        )}
+                        {timData.match.graderNotes && (
+                          <BlockStack gap="100">
+                            <Text variant="bodyMd" tone="subdued" as="span">Grader Notes</Text>
+                            <Text variant="bodyMd" as="p">{timData.match.graderNotes}</Text>
+                          </BlockStack>
+                        )}
+                        {timData.match.serialNumber && (
+                          <InlineStack align="space-between">
+                            <Text variant="bodyMd" tone="subdued" as="span">Serial #</Text>
+                            <span style={{ fontFamily: 'SF Mono, monospace' }}>
+                              <Text variant="bodyMd" as="span">{timData.match.serialNumber}</Text>
+                            </span>
+                          </InlineStack>
+                        )}
+                        <InlineStack align="space-between">
+                          <Text variant="bodyMd" tone="subdued" as="span">TIM Status</Text>
+                          <Text variant="bodyMd" as="span">{timData.match.itemStatus.replace(/_/g, ' ')}</Text>
+                        </InlineStack>
+                      </BlockStack>
+                    ) : (
+                      <Text variant="bodyMd" tone="subdued" as="p">
+                        No TIM data — {timData?.reason || 'no matching item found'}
+                      </Text>
+                    )}
                   </BlockStack>
                 </Card>
 

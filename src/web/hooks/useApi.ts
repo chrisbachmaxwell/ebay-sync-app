@@ -618,3 +618,32 @@ export const useEbayAuthStatus = () => {
     refetchInterval: 30000,
   });
 };
+
+// ---------------------------------------------------------------------------
+// TIM Condition Data
+// ---------------------------------------------------------------------------
+
+export interface TimConditionResponse {
+  match: {
+    timItemId: number;
+    condition: string | null;
+    conditionNotes: string | null;
+    graderNotes: string | null;
+    serialNumber: string | null;
+    brand: string | null;
+    productName: string;
+    sku: string;
+    itemStatus: string;
+  } | null;
+  matchedSku?: string;
+  reason?: string;
+}
+
+export const useTimCondition = (productId: string | undefined) => {
+  return useQuery({
+    queryKey: ['tim-condition', productId],
+    queryFn: () => apiClient.get<TimConditionResponse>(`/tim/condition/${productId}`),
+    enabled: !!productId,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+};

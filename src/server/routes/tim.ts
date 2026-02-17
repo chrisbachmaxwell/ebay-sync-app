@@ -1,0 +1,83 @@
+/**
+ * TIM (TradeInManager) API Routes
+ */
+import { Router, type Request, type Response } from 'express';
+import { fetchTimItems, clearTimCache } from '../../services/tim-service.js';
+import { findTimItemBySku } from '../../services/tim-matching.js';
+import { fetchDetailedShopifyProduct } from '../../shopify/products.js';
+import { getRawDb } from '../../db/client.js';
+import { error as logError } from '../../utils/logger.js';
+
+const router = Router();
+
+async function getShopifyAccessToken(): Promise<string | null> {
+  const db = await getRawDb();
+  const row = db.prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`).get() as any;
+  return row?.access_token ?? null;
+}
+
+/**
+ * GET /api/tim/items — List all TIM items (debugging)
+ */
+router.get('/api/tim/items', async (req: Request, res: Response) => {
+  try {
+    const refresh = req.query.refresh === 'true';
+    if (refresh) clearTimCache();
+    const items = await fetchTimItems(refresh);
+    res.json({ data: items, total: items.length });
+  } catch (err) {
+    logError(`[TIM Route] Failed to fetch items: ${err}`);
+    res.status(500).json({ error: 'Failed to fetch TIM items' });
+  }
+});
+
+/**
+ * GET /api/tim/condition/:productId — Look up TIM condition for a Shopify product
+ */
+router.get('/api/tim/condition/:productId', async (req: Request, res: Response) => {
+  try {
+    const { productId } = req.params;
+
+    const accessToken = await getShopifyAccessToken();
+    if (!accessToken) {
+      res.status(500).json({ error: 'Shopify not connected' });
+      return;
+    }
+
+    const pid = Array.isArray(productId) ? productId[0] : productId;
+
+    // Fetch the Shopify product to get its SKU
+    const product = await fetchDetailedShopifyProduct(accessToken, pid);
+    if (!product) {
+      res.status(404).json({ error: 'Shopify product not found' });
+      return;
+    }
+
+    // Get SKUs from all variants
+    const variants = product.variants ?? [];
+    const skus = variants
+      .map((v: any) => v.sku)
+      .filter((s: string | null | undefined): s is string => !!s);
+
+    if (skus.length === 0) {
+      res.json({ match: null, reason: 'Product has no SKUs' });
+      return;
+    }
+
+    // Try to find a TIM match
+    for (const sku of skus) {
+      const match = await findTimItemBySku(sku);
+      if (match) {
+        res.json({ match, matchedSku: sku });
+        return;
+      }
+    }
+
+    res.json({ match: null, skusChecked: skus, reason: 'No TIM item matches' });
+  } catch (err) {
+    logError(`[TIM Route] Condition lookup failed: ${err}`);
+    res.status(500).json({ error: 'Failed to look up TIM condition' });
+  }
+});
+
+export default router;
