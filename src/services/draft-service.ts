@@ -9,6 +9,55 @@ import { getRawDb } from '../db/client.js';
 import { info, warn, error as logError } from '../utils/logger.js';
 import { loadShopifyCredentials } from '../config/credentials.js';
 
+// ── Markdown → HTML converter ──────────────────────────────────────────
+// Converts the AI-generated markdown descriptions to HTML for Shopify's body_html field.
+function markdownToHtml(md: string): string {
+  const lines = md.split('\n');
+  const htmlLines: string[] = [];
+  let inList = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Empty line — close any open list, add paragraph break
+    if (!trimmed) {
+      if (inList) { htmlLines.push('</ul>'); inList = false; }
+      continue;
+    }
+
+    // Headings: ## Heading or **Heading:**  at start of line (standalone bold label)
+    if (/^#{1,3}\s+/.test(trimmed)) {
+      if (inList) { htmlLines.push('</ul>'); inList = false; }
+      const text = trimmed.replace(/^#{1,3}\s+/, '');
+      htmlLines.push(`<h3>${inlineMd(text)}</h3>`);
+      continue;
+    }
+
+    // Bullet lines: - item, * item, ✔ item, ✔️ item
+    const bulletMatch = trimmed.match(/^(?:[-*•]|✔️?)\s*(.*)/);
+    if (bulletMatch) {
+      if (!inList) { htmlLines.push('<ul>'); inList = true; }
+      htmlLines.push(`<li>${inlineMd(bulletMatch[1])}</li>`);
+      continue;
+    }
+
+    // Regular paragraph line
+    if (inList) { htmlLines.push('</ul>'); inList = false; }
+    htmlLines.push(`<p>${inlineMd(trimmed)}</p>`);
+  }
+
+  if (inList) htmlLines.push('</ul>');
+  return htmlLines.join('\n');
+}
+
+// Inline markdown: **bold**, *italic*, `code`
+function inlineMd(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code>$1</code>');
+}
+
 // ── Types ──────────────────────────────────────────────────────────────
 
 export interface Draft {
@@ -214,7 +263,8 @@ export async function approveDraft(
       updates.title = draft.draft_title;
     }
     if (options.description && draft.draft_description) {
-      updates.body_html = draft.draft_description;
+      // Convert markdown to HTML — AI generates markdown but Shopify expects HTML
+      updates.body_html = markdownToHtml(draft.draft_description);
     }
 
     // Push product field updates to Shopify
