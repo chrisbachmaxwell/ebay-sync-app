@@ -186,11 +186,20 @@ export class PhotoRoomService {
       process.env.PHOTOROOM_TEMPLATE_ID ||
       '014ca360-cb57-416e-8c17-365a647ca4ac';
 
-    info(`[PhotoRoom] Rendering with template ${tplId}: ${imageUrl}`);
+    info(`[PhotoRoom] Rendering with template ${tplId}: ${imageUrl.substring(0, 60)}...`);
 
     const formData = new FormData();
     formData.append('templateId', tplId);
-    formData.append('imageUrl', imageUrl);
+
+    // If input is a data URL or buffer, send as imageFile; otherwise use imageUrl
+    if (imageUrl.startsWith('data:')) {
+      const base64Data = imageUrl.split(',')[1];
+      const buffer = Buffer.from(base64Data, 'base64');
+      const blob = new Blob([buffer as unknown as BlobPart]);
+      formData.append('imageFile', blob, 'image.png');
+    } else {
+      formData.append('imageUrl', imageUrl);
+    }
 
     const response = await fetch('https://image-api.photoroom.com/v1/render', {
       method: 'POST',
