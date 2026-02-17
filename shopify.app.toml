@@ -1,8 +1,8 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-name = "Product Bridge"
+name = "ProductPipeline"
 client_id = "2db0555e4848a8264383dc0edfcfb8fe"
-application_url = "https://ebay-sync-app-production.up.railway.app"
+application_url = "https://product-pipeline-production.up.railway.app"
 embedded = true
 
 [access_scopes]
@@ -10,7 +10,7 @@ scopes = "write_products,read_orders,write_orders,read_inventory,write_inventory
 
 [auth]
 redirect_urls = [
-  "https://ebay-sync-app-production.up.railway.app/auth/callback"
+  "https://product-pipeline-production.up.railway.app/auth/callback"
 ]
 
 [webhooks]
