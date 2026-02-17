@@ -255,14 +255,24 @@ export const ShopifyProductDetail: React.FC = () => {
   const runPipelineMutation = useMutation({
     mutationFn: () => apiClient.post(`/auto-list/${id}`),
     onSuccess: (result: any) => {
-      setPipelineResult(result);
-      setShowReviewModal(true);
-      addNotification({
-        type: 'success',
-        title: 'Pipeline completed!',
-        message: 'Review the results below.',
-        autoClose: 4000
-      });
+      if (result?.success || result?.ok) {
+        setPipelineResult(result);
+        setShowReviewModal(true);
+        addNotification({
+          type: 'success',
+          title: 'Pipeline completed!',
+          message: 'Review the results below.',
+          autoClose: 4000
+        });
+      } else {
+        addNotification({
+          type: 'error',
+          title: 'Pipeline failed',
+          message: result?.error || 'AI processing did not return complete results. Try again.',
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ['product-pipeline-status', id] });
+      queryClient.invalidateQueries({ queryKey: ['pipeline-jobs', id] });
     },
     onError: (error) => {
       addNotification({
