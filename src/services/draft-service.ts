@@ -19,13 +19,13 @@ function markdownToHtml(md: string): string {
   for (const line of lines) {
     const trimmed = line.trim();
 
-    // Empty line — close any open list, add paragraph break
+    // Empty line — close any open list
     if (!trimmed) {
       if (inList) { htmlLines.push('</ul>'); inList = false; }
       continue;
     }
 
-    // Headings: ## Heading or **Heading:**  at start of line (standalone bold label)
+    // Headings: ## Heading
     if (/^#{1,3}\s+/.test(trimmed)) {
       if (inList) { htmlLines.push('</ul>'); inList = false; }
       const text = trimmed.replace(/^#{1,3}\s+/, '');
@@ -33,8 +33,16 @@ function markdownToHtml(md: string): string {
       continue;
     }
 
-    // Bullet lines: - item, * item, ✔ item, ✔️ item
-    const bulletMatch = trimmed.match(/^(?:[-*•]|✔️?)\s*(.*)/);
+    // Standalone bold label lines: **Key Features:** or **Condition: Excellent Plus**
+    // These start and end with ** and have no other content after the closing **
+    if (/^\*\*[^*]+\*\*\s*$/.test(trimmed)) {
+      if (inList) { htmlLines.push('</ul>'); inList = false; }
+      htmlLines.push(`<h3>${inlineMd(trimmed)}</h3>`);
+      continue;
+    }
+
+    // Bullet lines: - item, • item, ✔ item, ✔️ item (but NOT **bold** lines)
+    const bulletMatch = trimmed.match(/^(?:[-•]|✔️?)\s+(.*)/);
     if (bulletMatch) {
       if (!inList) { htmlLines.push('<ul>'); inList = true; }
       htmlLines.push(`<li>${inlineMd(bulletMatch[1])}</li>`);
@@ -54,7 +62,7 @@ function markdownToHtml(md: string): string {
 function inlineMd(text: string): string {
   return text
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code>$1</code>');
 }
 
