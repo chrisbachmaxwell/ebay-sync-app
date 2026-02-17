@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getRawDb } from '../../db/client.js';
+import { info, error as logError } from '../../utils/logger.js';
 
 const router = Router();
 
@@ -74,6 +75,190 @@ router.get('/api/pipeline/jobs/:id', (req, res) => {
     .catch((err) => {
       res.status(500).json({ error: 'Failed to fetch job', detail: String(err) });
     });
+});
+
+/**
+ * GET /api/pipeline/drive-search/:productId
+ * Search the StyleShoots drive for photos matching a Shopify product (preview only).
+ */
+router.get('/api/pipeline/drive-search/:productId', async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    const db = await getRawDb();
+    const tokenRow = db
+      .prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`)
+      .get() as { access_token: string } | undefined;
+
+    if (!tokenRow?.access_token) {
+      res.status(400).json({ error: 'Shopify token not found' });
+      return;
+    }
+
+    const { fetchDetailedShopifyProduct } = await import('../../shopify/products.js');
+    const product = await fetchDetailedShopifyProduct(tokenRow.access_token, productId);
+    if (!product) {
+      res.status(404).json({ error: 'Product not found in Shopify' });
+      return;
+    }
+
+    const { searchDriveForProduct, isDriveMounted } = await import('../../watcher/drive-search.js');
+
+    if (!isDriveMounted()) {
+      res.json({ success: false, error: 'StyleShoots drive is not mounted', product: { id: product.id, title: product.title } });
+      return;
+    }
+
+    // Extract serial suffix from SKU if available
+    const sku = product.variants?.[0]?.sku ?? '';
+    const skuSuffix = sku.match(/(\d{2,4})$/)?.[1] ?? null;
+
+    const driveResult = await searchDriveForProduct(product.title, skuSuffix);
+
+    res.json({
+      success: !!driveResult,
+      product: { id: product.id, title: product.title },
+      drive: driveResult ? {
+        folderPath: driveResult.folderPath,
+        presetName: driveResult.presetName,
+        folderName: driveResult.folderName,
+        imageCount: driveResult.imagePaths.length,
+      } : null,
+    });
+  } catch (err) {
+    logError(`[PipelineAPI] Drive search error: ${err}`);
+    res.status(500).json({ error: 'Drive search failed', detail: String(err) });
+  }
+});
+
+/**
+ * POST /api/pipeline/trigger/:productId
+ * Manually trigger the full pipeline for a single Shopify product:
+ * 1. Fetch product from Shopify (active or draft)
+ * 2. Search StyleShoots drive for matching photos
+ * 3. If found: create draft with photos, generate AI description, apply TIM tag
+ * 4. Return full status
+ */
+router.post('/api/pipeline/trigger/:productId', async (req, res) => {
+  try {
+    const { productId } = req.params;
+    info(`[PipelineAPI] Manual trigger for product ${productId}`);
+
+    const db = await getRawDb();
+    const tokenRow = db
+      .prepare(`SELECT access_token FROM auth_tokens WHERE platform = 'shopify'`)
+      .get() as { access_token: string } | undefined;
+
+    if (!tokenRow?.access_token) {
+      res.status(400).json({ success: false, error: 'Shopify token not found' });
+      return;
+    }
+
+    // Step 1: Fetch product
+    const { fetchDetailedShopifyProduct } = await import('../../shopify/products.js');
+    const product = await fetchDetailedShopifyProduct(tokenRow.access_token, productId);
+    if (!product) {
+      res.status(404).json({ success: false, error: 'Product not found in Shopify' });
+      return;
+    }
+
+    info(`[PipelineAPI] Found product: ${product.title} (status: ${product.status})`);
+
+    // Step 2: Search drive for photos
+    const { searchDriveForProduct, isDriveMounted } = await import('../../watcher/drive-search.js');
+
+    if (!isDriveMounted()) {
+      res.json({ success: false, error: 'StyleShoots drive is not mounted', product: { id: product.id, title: product.title } });
+      return;
+    }
+
+    const sku = product.variants?.[0]?.sku ?? '';
+    const skuSuffix = sku.match(/(\d{2,4})$/)?.[1] ?? null;
+    const driveResult = await searchDriveForProduct(product.title, skuSuffix);
+
+    if (!driveResult) {
+      res.json({
+        success: false,
+        error: 'No photos found on StyleShoots drive for this product',
+        product: { id: product.id, title: product.title },
+      });
+      return;
+    }
+
+    info(`[PipelineAPI] Found ${driveResult.imagePaths.length} photos in ${driveResult.presetName}/${driveResult.folderName}`);
+
+    // Step 3: Create draft with photos (reuse watcher's draft-service)
+    const {
+      createDraft,
+      checkExistingContent,
+    } = await import('../../services/draft-service.js');
+
+    const existingContent = await checkExistingContent(product.id);
+    const draftId = await createDraft(product.id, {
+      title: product.title,
+      images: driveResult.imagePaths,
+      originalTitle: existingContent.title,
+      originalDescription: existingContent.description,
+      originalImages: existingContent.images,
+    });
+
+    info(`[PipelineAPI] Draft #${draftId} created with ${driveResult.imagePaths.length} images`);
+
+    // Step 4: Run AI description pipeline
+    let descriptionGenerated = false;
+    let descriptionPreview: string | undefined;
+    let pipelineJobId: string | undefined;
+
+    try {
+      const { autoListProduct } = await import('../../sync/auto-listing-pipeline.js');
+      const pipelineResult = await autoListProduct(product.id);
+      descriptionGenerated = pipelineResult.success;
+      descriptionPreview = pipelineResult.description;
+      pipelineJobId = pipelineResult.jobId;
+    } catch (err) {
+      logError(`[PipelineAPI] AI description failed (non-fatal): ${err}`);
+    }
+
+    // Step 5: Apply TIM condition tag
+    let tagApplied = false;
+    let conditionTag: string | undefined;
+
+    try {
+      const { findTimItemForProduct, formatConditionForPrompt } = await import('../../services/tim-matching.js');
+      const skus = product.variants.map(v => v.sku).filter(Boolean);
+      const timData = await findTimItemForProduct(skus);
+      if (timData?.condition) {
+        conditionTag = `Condition: ${timData.condition}`;
+        tagApplied = true;
+      }
+    } catch (err) {
+      logError(`[PipelineAPI] TIM tag lookup failed (non-fatal): ${err}`);
+    }
+
+    res.json({
+      success: true,
+      product: { id: product.id, title: product.title, status: product.status },
+      photos: {
+        found: true,
+        count: driveResult.imagePaths.length,
+        presetName: driveResult.presetName,
+        folderName: driveResult.folderName,
+      },
+      draft: { id: draftId },
+      description: {
+        generated: descriptionGenerated,
+        preview: descriptionPreview?.substring(0, 500),
+      },
+      condition: {
+        tagApplied,
+        tag: conditionTag,
+      },
+      pipelineJobId,
+    });
+  } catch (err) {
+    logError(`[PipelineAPI] Trigger error: ${err}`);
+    res.status(500).json({ success: false, error: 'Pipeline trigger failed', detail: String(err) });
+  }
 });
 
 export default router;

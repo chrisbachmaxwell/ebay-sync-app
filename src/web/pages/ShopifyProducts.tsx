@@ -28,7 +28,7 @@ import {
 } from '@shopify/polaris-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import { apiClient, useListings, useProductNotes, useSaveProductNotes, useTimCondition, useTagProductCondition } from '../hooks/useApi';
+import { apiClient, useListings, useProductNotes, useSaveProductNotes, useTimCondition, useTagProductCondition, useRunPipeline, type PipelineTriggerResult } from '../hooks/useApi';
 import { useAppStore } from '../store';
 import PhotoGallery, { type GalleryImage } from '../components/PhotoGallery';
 import PhotoControls, { type PhotoRoomParams } from '../components/PhotoControls';
@@ -164,6 +164,16 @@ export const ShopifyProductDetail: React.FC = () => {
   // Pipeline Review Modal state
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [pipelineResult, setPipelineResult] = useState<any>(null);
+  const [drivePipelineResult, setDrivePipelineResult] = useState<PipelineTriggerResult | null>(null);
+
+  // Drive pipeline trigger
+  const drivePipelineMutation = useRunPipeline(id);
+  // Capture result when mutation succeeds
+  React.useEffect(() => {
+    if (drivePipelineMutation.data) {
+      setDrivePipelineResult(drivePipelineMutation.data);
+    }
+  }, [drivePipelineMutation.data]);
 
   // TIM Condition data
   const { data: timData, isLoading: timLoading } = useTimCondition(id);
@@ -1451,6 +1461,30 @@ export const ShopifyProductDetail: React.FC = () => {
                       >
                         🚀 Run Full Pipeline
                       </Button>
+                      <Button
+                        fullWidth
+                        loading={drivePipelineMutation.isPending}
+                        onClick={() => drivePipelineMutation.mutate()}
+                      >
+                        📸 Run Pipeline (Drive Search)
+                      </Button>
+                      {drivePipelineResult && (
+                        <Banner
+                          title={drivePipelineResult.success ? 'Drive Pipeline Complete' : 'Drive Pipeline Issue'}
+                          tone={drivePipelineResult.success ? 'success' : 'warning'}
+                          onDismiss={() => setDrivePipelineResult(null)}
+                        >
+                          {drivePipelineResult.success ? (
+                            <BlockStack gap="100">
+                              <Text as="p" variant="bodySm">Found {drivePipelineResult.photos?.count} photos in {drivePipelineResult.photos?.presetName}/{drivePipelineResult.photos?.folderName}</Text>
+                              {drivePipelineResult.description?.generated && <Text as="p" variant="bodySm">✅ AI description generated</Text>}
+                              {drivePipelineResult.condition?.tagApplied && <Text as="p" variant="bodySm">✅ {drivePipelineResult.condition.tag}</Text>}
+                            </BlockStack>
+                          ) : (
+                            <Text as="p" variant="bodySm">{drivePipelineResult.error}</Text>
+                          )}
+                        </Banner>
+                      )}
                     </BlockStack>
                   </BlockStack>
                 </Card>

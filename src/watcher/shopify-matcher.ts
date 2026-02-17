@@ -29,7 +29,7 @@ let cachedProducts: ShopifyOverviewProduct[] | null = null;
 let cacheTimestamp = 0;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-async function getProducts(): Promise<ShopifyOverviewProduct[]> {
+async function getProducts(options?: { includeDrafts?: boolean }): Promise<ShopifyOverviewProduct[]> {
   const now = Date.now();
   if (cachedProducts && (now - cacheTimestamp) < CACHE_TTL) {
     return cachedProducts;
@@ -45,7 +45,8 @@ async function getProducts(): Promise<ShopifyOverviewProduct[]> {
   }
 
   info('[ShopifyMatcher] Refreshing product cache from Shopify...');
-  cachedProducts = await fetchAllShopifyProductsOverview(row.access_token);
+  // Always fetch both active and draft for caching; filtering happens at match time
+  cachedProducts = await fetchAllShopifyProductsOverview(row.access_token, { includeDrafts: true });
   cacheTimestamp = now;
   info(`[ShopifyMatcher] Cached ${cachedProducts.length} products`);
 
@@ -111,16 +112,20 @@ function tokenOverlap(queryTokens: string[], targetTokens: string[]): number {
 export async function searchShopifyProduct(
   productName: string,
   serialSuffix: string | null,
+  options?: { includeDrafts?: boolean },
 ): Promise<MatchResult | null> {
-  const products = await getProducts();
+  const products = await getProducts(options);
   const queryTokens = tokenize(productName);
+
+  const allowedStatuses = new Set(['active']);
+  if (options?.includeDrafts) allowedStatuses.add('draft');
 
   // ── Pass 1: Exact substring match (title contains product name) ──
   // If serial suffix present, also check title or SKU contains it
   const titleMatches: { product: ShopifyOverviewProduct; score: number }[] = [];
 
   for (const product of products) {
-    if (product.status !== 'active') continue;
+    if (!allowedStatuses.has(product.status)) continue;
 
     const titleLower = product.title.toLowerCase();
     const nameLower = productName.toLowerCase();
@@ -165,7 +170,7 @@ export async function searchShopifyProduct(
   const tokenMatches: { product: ShopifyOverviewProduct; overlap: number }[] = [];
 
   for (const product of products) {
-    if (product.status !== 'active') continue;
+    if (!allowedStatuses.has(product.status)) continue;
 
     const titleTokens = tokenize(product.title);
     const overlap = tokenOverlap(queryTokens, titleTokens);
@@ -192,7 +197,7 @@ export async function searchShopifyProduct(
   // ── Pass 3: Serial-only match (SKU suffix) ──────────────────────
   if (serialSuffix) {
     for (const product of products) {
-      if (product.status !== 'active') continue;
+      if (!allowedStatuses.has(product.status)) continue;
 
       const skuMatch = product.variants.some(v =>
         v.sku && v.sku.endsWith(serialSuffix)

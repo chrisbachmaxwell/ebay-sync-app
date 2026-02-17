@@ -669,3 +669,71 @@ export const useTagProductCondition = (productId: string | undefined) => {
     },
   });
 };
+
+// ---------------------------------------------------------------------------
+// Pipeline Manual Trigger
+// ---------------------------------------------------------------------------
+
+export interface PipelineTriggerResult {
+  success: boolean;
+  error?: string;
+  product?: { id: string; title: string; status: string };
+  photos?: { found: boolean; count: number; presetName: string; folderName: string };
+  draft?: { id: number };
+  description?: { generated: boolean; preview?: string };
+  condition?: { tagApplied: boolean; tag?: string };
+  pipelineJobId?: string;
+}
+
+export interface DriveSearchResult {
+  success: boolean;
+  error?: string;
+  product?: { id: string; title: string };
+  drive?: { folderPath: string; presetName: string; folderName: string; imageCount: number } | null;
+}
+
+export const useRunPipeline = (productId: string | undefined) => {
+  const queryClient = useQueryClient();
+  const { addNotification } = useAppStore();
+
+  return useMutation({
+    mutationFn: () => apiClient.post<PipelineTriggerResult>(`/pipeline/trigger/${productId}`),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['product-info', productId] });
+      queryClient.invalidateQueries({ queryKey: ['product-pipeline-status', productId] });
+      queryClient.invalidateQueries({ queryKey: ['pipeline-jobs', productId] });
+      queryClient.invalidateQueries({ queryKey: ['active-photos', productId] });
+      if (data.success) {
+        addNotification({
+          type: 'success',
+          title: 'Pipeline completed',
+          message: `Found ${data.photos?.count ?? 0} photos. ${data.description?.generated ? 'Description generated.' : ''}`,
+          autoClose: 6000,
+        });
+      } else {
+        addNotification({
+          type: 'warning',
+          title: 'Pipeline incomplete',
+          message: data.error || 'No photos found',
+          autoClose: 8000,
+        });
+      }
+    },
+    onError: (error) => {
+      addNotification({
+        type: 'error',
+        title: 'Pipeline trigger failed',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        autoClose: 8000,
+      });
+    },
+  });
+};
+
+export const useDriveSearch = (productId: string | undefined) => {
+  return useQuery({
+    queryKey: ['drive-search', productId],
+    queryFn: () => apiClient.get<DriveSearchResult>(`/pipeline/drive-search/${productId}`),
+    enabled: false, // Only fetch on demand
+  });
+};

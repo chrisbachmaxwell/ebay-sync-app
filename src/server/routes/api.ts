@@ -119,7 +119,7 @@ router.get('/api/products/overview', async (req: Request, res: Response) => {
         },
       ];
     } else {
-      shopifyProducts = await fetchAllShopifyProductsOverview(tokenRow.access_token);
+      shopifyProducts = await fetchAllShopifyProductsOverview(tokenRow.access_token, { includeDrafts: true });
     }
 
     const mappingRows = productId

@@ -92,65 +92,74 @@ export const fetchShopifyProducts = async (accessToken: string, first = 20): Pro
  */
 export const fetchAllShopifyProductsOverview = async (
   accessToken: string,
+  options?: { includeDrafts?: boolean },
 ): Promise<ShopifyOverviewProduct[]> => {
   const creds = await loadShopifyCredentials();
   const products: ShopifyOverviewProduct[] = [];
-  let sinceId: string | undefined = undefined;
 
-  while (true) {
-    const params = new URLSearchParams();
-    params.set('limit', '250');
-    if (sinceId) params.set('since_id', sinceId);
-    params.set('fields', 'id,title,status,images,variants');
+  // Fetch active products, then optionally draft products
+  const statuses = ['active'];
+  if (options?.includeDrafts) statuses.push('draft');
 
-    const url = `https://${creds.storeDomain}/admin/api/2024-01/products.json?${params.toString()}`;
-    const response = await fetch(url, {
-      headers: { 'X-Shopify-Access-Token': accessToken },
-    });
+  for (const status of statuses) {
+    let sinceId: string | undefined = undefined;
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch products: ${response.status} ${response.statusText}`);
+    while (true) {
+      const params = new URLSearchParams();
+      params.set('limit', '250');
+      params.set('status', status);
+      if (sinceId) params.set('since_id', sinceId);
+      params.set('fields', 'id,title,status,images,variants');
+
+      const url = `https://${creds.storeDomain}/admin/api/2024-01/products.json?${params.toString()}`;
+      const response = await fetch(url, {
+        headers: { 'X-Shopify-Access-Token': accessToken },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch ${status} products: ${response.status} ${response.statusText}`);
+      }
+
+      const data = (await response.json()) as {
+        products: Array<{
+          id: number;
+          title: string;
+          status: string;
+          images: Array<{
+            id: number;
+            src: string;
+            alt?: string;
+          }>;
+          variants: Array<{
+            id: number;
+            sku: string;
+            price: string;
+          }>;
+        }>;
+      };
+
+      const page = data.products ?? [];
+      products.push(
+        ...page.map((product) => ({
+          id: String(product.id),
+          title: product.title,
+          status: product.status,
+          images: (product.images ?? []).map((img) => ({
+            id: String(img.id),
+            src: img.src,
+            alt: img.alt,
+          })),
+          variants: (product.variants ?? []).map((variant) => ({
+            id: String(variant.id),
+            sku: variant.sku || '',
+            price: variant.price,
+          })),
+        })),
+      );
+
+      if (page.length < 250) break;
+      sinceId = String(page[page.length - 1].id);
     }
-
-    const data = (await response.json()) as {
-      products: Array<{
-        id: number;
-        title: string;
-        status: string;
-        images: Array<{
-          id: number;
-          src: string;
-          alt?: string;
-        }>;
-        variants: Array<{
-          id: number;
-          sku: string;
-          price: string;
-        }>;
-      }>;
-    };
-
-    const page = data.products ?? [];
-    products.push(
-      ...page.map((product) => ({
-        id: String(product.id),
-        title: product.title,
-        status: product.status,
-        images: (product.images ?? []).map((img) => ({
-          id: String(img.id),
-          src: img.src,
-          alt: img.alt,
-        })),
-        variants: (product.variants ?? []).map((variant) => ({
-          id: String(variant.id),
-          sku: variant.sku || '',
-          price: variant.price,
-        })),
-      })),
-    );
-
-    if (page.length < 250) break;
-    sinceId = String(page[page.length - 1].id);
   }
 
   return products;
