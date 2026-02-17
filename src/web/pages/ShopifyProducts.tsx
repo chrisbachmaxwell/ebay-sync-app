@@ -545,6 +545,7 @@ export const ShopifyProductDetail: React.FC = () => {
               onDeleteSingle={handleDeleteSingle}
               onDeleteBulk={handleDeleteBulk}
               onEditPhotos={handleEditPhotos}
+              onSelectionChange={setSelectedPhotoIds}
             />
 
             {/* ── Edit Photos Panel ── */}

@@ -27,6 +27,7 @@ interface ActivePhotosGalleryProps {
   onDeleteSingle: (imageId: number) => void;
   onDeleteBulk: (imageIds: number[]) => void;
   onEditPhotos: (imageIds: number[]) => void;
+  onSelectionChange?: (selectedIds: number[]) => void;
   onImageClick?: (photo: ActivePhoto, index: number) => void;
 }
 
@@ -39,32 +40,37 @@ const ActivePhotosGallery: React.FC<ActivePhotosGalleryProps> = ({
   onDeleteSingle,
   onDeleteBulk,
   onEditPhotos,
+  onSelectionChange,
   onImageClick,
 }) => {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  
+  // Sync selection changes to parent
+  const updateSelection = useCallback((newIds: Set<number>) => {
+    setSelectedIds(newIds);
+    onSelectionChange?.(Array.from(newIds));
+  }, [onSelectionChange]);
   const [deleteModalActive, setDeleteModalActive] = useState(false);
   const [deletingIds, setDeletingIds] = useState<number[]>([]);
   const [lightboxPhoto, setLightboxPhoto] = useState<{ photo: ActivePhoto; index: number } | null>(null);
 
   const handleSelectAll = useCallback(() => {
     if (selectedIds.size === photos.length) {
-      setSelectedIds(new Set());
+      updateSelection(new Set());
     } else {
-      setSelectedIds(new Set(photos.map(p => p.id)));
+      updateSelection(new Set(photos.map(p => p.id)));
     }
-  }, [photos, selectedIds.size]);
+  }, [photos, selectedIds.size, updateSelection]);
 
   const handleSelectPhoto = useCallback((photoId: number) => {
-    setSelectedIds(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(photoId)) {
-        newSet.delete(photoId);
-      } else {
-        newSet.add(photoId);
-      }
-      return newSet;
-    });
-  }, []);
+    const newSet = new Set(selectedIds);
+    if (newSet.has(photoId)) {
+      newSet.delete(photoId);
+    } else {
+      newSet.add(photoId);
+    }
+    updateSelection(newSet);
+  }, [selectedIds, updateSelection]);
 
   const handleDeleteSingle = useCallback((imageId: number) => {
     setDeletingIds([imageId]);
@@ -83,7 +89,7 @@ const ActivePhotosGallery: React.FC<ActivePhotosGalleryProps> = ({
       onDeleteBulk(deletingIds);
     }
     setDeleteModalActive(false);
-    setSelectedIds(new Set());
+    updateSelection(new Set());
     setDeletingIds([]);
   }, [deletingIds, onDeleteSingle, onDeleteBulk]);
 
