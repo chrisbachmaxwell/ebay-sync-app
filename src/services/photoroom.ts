@@ -123,8 +123,9 @@ export class PhotoRoomService {
 
     info(`[PhotoRoom] Processing with uniform padding (${minPad}px min): ${imageUrl.substring(0, 60)}...`);
 
-    // Step 1: Remove background only — no padding, no fixed size, transparent bg
-    const imageBuffer = await this.downloadImage(imageUrl);
+    // Step 0: Download and auto-rotate based on EXIF orientation
+    const rawBuffer = await this.downloadImage(imageUrl);
+    const imageBuffer = await sharp(rawBuffer).rotate().toBuffer(); // auto-rotate from EXIF
     const formData = this.buildFormData(imageBuffer, 'image.jpg');
     formData.append('removeBackground', 'true');
     formData.append('background.color', 'transparent');
