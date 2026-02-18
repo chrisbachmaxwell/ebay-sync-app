@@ -222,6 +222,18 @@ router.get('/api/pipeline/drive-search/:productId', async (req, res) => {
 router.post('/api/pipeline/trigger/:productId', async (req, res) => {
   try {
     const { productId } = req.params;
+
+    // Prevent duplicate runs — check if there's already an active job for this product
+    const { getPipelineJobs } = await import('../../sync/pipeline-status.js');
+    const existingJobs = getPipelineJobs();
+    const alreadyRunning = existingJobs.find(
+      (j: any) => j.shopifyProductId === productId && (j.status === 'processing' || j.status === 'queued'),
+    );
+    if (alreadyRunning) {
+      res.json({ success: false, error: 'Pipeline already running for this product', jobId: alreadyRunning.id });
+      return;
+    }
+
     info(`[PipelineAPI] Manual trigger for product ${productId}`);
 
     const db = await getRawDb();

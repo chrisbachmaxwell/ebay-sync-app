@@ -527,6 +527,30 @@ async function uploadDraftImagesToShopify(
   const fs = await import('node:fs');
   const path = await import('node:path');
 
+  // Step 0: Delete existing images to prevent duplicates
+  try {
+    const listUrl = `https://${storeDomain}/admin/api/2024-01/products/${productId}/images.json`;
+    const listRes = await fetch(listUrl, {
+      headers: { 'X-Shopify-Access-Token': accessToken },
+    });
+    if (listRes.ok) {
+      const listData = await listRes.json() as { images: Array<{ id: number }> };
+      for (const existing of listData.images) {
+        const delUrl = `https://${storeDomain}/admin/api/2024-01/products/${productId}/images/${existing.id}.json`;
+        await fetch(delUrl, {
+          method: 'DELETE',
+          headers: { 'X-Shopify-Access-Token': accessToken },
+        });
+        await new Promise((r) => setTimeout(r, 300)); // rate limit
+      }
+      if (listData.images.length > 0) {
+        info(`[DraftService] Deleted ${listData.images.length} existing images before uploading new ones`);
+      }
+    }
+  } catch (err) {
+    warn(`[DraftService] Failed to clear existing images (non-fatal): ${err}`);
+  }
+
   for (let i = 0; i < images.length; i++) {
     const img = images[i];
     try {
