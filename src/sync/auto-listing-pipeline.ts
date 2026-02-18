@@ -157,11 +157,13 @@ async function generateDescription(
   try {
     const systemPrompt = await getDescriptionPrompt();
 
-    let userContent = `Product: ${title}\nBrand: ${vendor}\nCondition: Used — Excellent Plus (assume unless specified otherwise)\nCategory: Auto-detect from product name\nIncluded accessories: Standard items for this product (caps, hood, etc. — assume typical unless specified)`;
-
+    // Build condition line from TIM data if available
+    let conditionLine = 'Used — Excellent Plus (assume unless specified otherwise)';
     if (timConditionText?.trim()) {
-      userContent += `\n\n${timConditionText.trim()}`;
+      conditionLine = `Used — ${timConditionText.trim()}`;
     }
+
+    let userContent = `Product: ${title}\nBrand: ${vendor}\nCondition: ${conditionLine}\nCategory: Auto-detect from product name\nIncluded accessories: Standard items for this product (caps, hood, etc. — assume typical unless specified)`;
 
     if (productNotes?.trim()) {
       userContent += `\n\nProduct condition notes (MUST be mentioned in the description): ${productNotes.trim()}`;
