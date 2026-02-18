@@ -411,21 +411,46 @@ export async function autoListProduct(
       logError(`[AutoList] TIM tagging failed (non-fatal): ${err}`);
     }
 
+    // ── Step 2c: Search drive for product photos ─────────────────────
+    let driveImages: string[] = [];
+    try {
+      const { searchDriveForProduct, isDriveMounted, resolveImagePath } = await import('../watcher/drive-search.js');
+      if (isDriveMounted()) {
+        const sku = (product.variants?.[0] as any)?.sku ?? '';
+        const skuSuffix = sku.match(/(\d{2,4})$/)?.[1] ?? null;
+        const driveResult = await searchDriveForProduct(product.title || '', skuSuffix);
+        if (driveResult) {
+          driveImages = await Promise.all(driveResult.imagePaths.map((p: string) => resolveImagePath(p)));
+          info(`[AutoList] Found ${driveImages.length} photos on drive: ${driveResult.presetName}/${driveResult.folderName}`);
+        } else {
+          info(`[AutoList] No drive photos found for "${product.title}"`);
+        }
+      }
+    } catch (driveErr) {
+      warn(`[AutoList] Drive search failed (non-fatal): ${driveErr}`);
+    }
+
     // ── Step 3: Process images via PhotoRoom ───────────────────────────
     await updatePipelineStep(jobId, 'process_images', 'running');
 
     let processedImages: string[] = [];
     try {
-      processedImages = await processProductImages(product);
+      // If we found drive photos, use those; otherwise process existing Shopify images
+      if (driveImages.length > 0) {
+        processedImages = driveImages;
+        info(`[AutoList] Using ${driveImages.length} drive photos`);
+      } else {
+        processedImages = await processProductImages(product);
+      }
       await updatePipelineStep(
         jobId,
         'process_images',
         'done',
-        `${processedImages.length} images processed`,
+        `${processedImages.length} images ${driveImages.length > 0 ? 'from drive' : 'processed'}`,
       );
       await upsertPipelineStatus({
-        imagesProcessed: Boolean(process.env.PHOTOROOM_API_KEY),
-        imagesProcessedCount: Boolean(process.env.PHOTOROOM_API_KEY) ? processedImages.length : 0,
+        imagesProcessed: processedImages.length > 0,
+        imagesProcessedCount: processedImages.length,
       });
     } catch (imgErr) {
       warn(`[AutoList] Image processing error (non-fatal): ${imgErr}`);
