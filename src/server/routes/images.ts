@@ -559,7 +559,7 @@ async function signGcsObject(objectPath: string): Promise<string> {
   return url;
 }
 
-router.get('/proxy', async (req: Request, res: Response) => {
+router.get('/api/images/proxy', async (req: Request, res: Response) => {
   const url = req.query.url as string;
   const wantClean = req.query.clean === 'true';
   if (!url || (!url.startsWith('https://storage.googleapis.com/') && !url.startsWith('https://storage.cloud.google.com/'))) {
