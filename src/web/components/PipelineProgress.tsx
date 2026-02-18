@@ -262,6 +262,27 @@ const PipelineProgress: React.FC<PipelineProgressProps> = ({ jobId, onComplete, 
               {etaText}
             </Text>
           )}
+          {job.status === 'processing' && (
+            <button
+              onClick={async () => {
+                try {
+                  await fetch(`/api/pipeline/jobs/${job.id}/cancel`, { method: 'POST' });
+                } catch { /* best effort */ }
+              }}
+              style={{
+                marginTop: '4px',
+                padding: '4px 12px',
+                fontSize: '12px',
+                background: '#dc2626',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+              }}
+            >
+              ✕ Cancel
+            </button>
+          )}
         </BlockStack>
       </InlineStack>
 

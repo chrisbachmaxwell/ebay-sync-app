@@ -262,3 +262,25 @@ export async function setPipelineJobTitle(jobId: string, title: string): Promise
   job.updatedAt = new Date().toISOString();
   await persistJob(job);
 }
+
+/** Cancel a pipeline job — marks it as failed with cancellation message. */
+export function cancelPipelineJob(jobId: string): boolean {
+  const job = jobs.get(jobId);
+  if (!job) return false;
+  if (job.status !== 'processing' && job.status !== 'queued') return false;
+  job.status = 'failed';
+  const now = new Date().toISOString();
+  for (const step of job.steps) {
+    if (step.status === 'running') {
+      step.status = 'error';
+      step.result = 'Cancelled by user';
+      step.completedAt = now;
+    } else if (step.status === 'pending') {
+      step.status = 'error';
+      step.result = 'Cancelled';
+      step.completedAt = now;
+    }
+  }
+  pipelineEvents.emit('step', { jobId, step: 'cancelled', status: 'error', message: 'Job cancelled by user' });
+  return true;
+}

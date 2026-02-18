@@ -344,3 +344,17 @@ router.post('/api/pipeline/trigger/:productId', async (req, res) => {
 });
 
 export default router;
+
+/**
+ * POST /api/pipeline/jobs/:id/cancel
+ * Cancel a running or queued pipeline job.
+ */
+router.post('/api/pipeline/jobs/:id/cancel', (req, res) => {
+  const { cancelPipelineJob } = require('../../sync/pipeline-status.js');
+  const cancelled = cancelPipelineJob(req.params.id);
+  if (cancelled) {
+    res.json({ success: true, message: 'Job cancelled' });
+  } else {
+    res.status(404).json({ success: false, error: 'Job not found or already completed' });
+  }
+});
