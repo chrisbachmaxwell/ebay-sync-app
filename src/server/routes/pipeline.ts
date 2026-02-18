@@ -165,7 +165,7 @@ router.post('/api/pipeline/trigger/:productId', async (req, res) => {
     info(`[PipelineAPI] Found product: ${product.title} (status: ${product.status})`);
 
     // Step 2: Search drive for photos
-    const { searchDriveForProduct, isDriveMounted } = await import('../../watcher/drive-search.js');
+    const { searchDriveForProduct, isDriveMounted, resolveImagePath } = await import('../../watcher/drive-search.js');
 
     if (!isDriveMounted()) {
       res.json({ success: false, error: 'StyleShoots drive is not mounted', product: { id: product.id, title: product.title } });
@@ -184,6 +184,12 @@ router.post('/api/pipeline/trigger/:productId', async (req, res) => {
       });
       return;
     }
+
+    // Resolve cloud image paths to local temp files if in cloud mode
+    const resolvedPaths = await Promise.all(
+      driveResult.imagePaths.map(p => resolveImagePath(p))
+    );
+    driveResult.imagePaths = resolvedPaths;
 
     info(`[PipelineAPI] Found ${driveResult.imagePaths.length} photos in ${driveResult.presetName}/${driveResult.folderName}`);
 

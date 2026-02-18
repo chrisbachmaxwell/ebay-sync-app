@@ -214,6 +214,8 @@ async function searchCloudForProduct(
 // ── Local Backend ──────────────────────────────────────────────────────
 
 export function isDriveMounted(drivePath?: string): boolean {
+  // In cloud mode, we don't need a local drive
+  if (DRIVE_MODE === 'cloud') return true;
   try {
     fs.accessSync(drivePath ?? DEFAULT_DRIVE_PATH, fs.constants.R_OK);
     return true;
