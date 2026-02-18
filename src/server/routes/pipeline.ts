@@ -370,3 +370,20 @@ router.post('/api/pipeline/jobs/:id/cancel', async (req, res) => {
     res.status(404).json({ success: false, error: 'Job not found or already completed' });
   }
 });
+
+/**
+ * POST /api/pipeline/jobs/clear-stuck
+ * Force-clear all stuck/processing jobs.
+ */
+router.post('/api/pipeline/jobs/clear-stuck', async (req, res) => {
+  const { getPipelineJobs, cancelPipelineJob } = await import('../../sync/pipeline-status.js');
+  const allJobs = getPipelineJobs();
+  let cleared = 0;
+  for (const job of allJobs) {
+    if (job.status === 'processing' || job.status === 'queued') {
+      cancelPipelineJob(job.id);
+      cleared++;
+    }
+  }
+  res.json({ success: true, cleared });
+});

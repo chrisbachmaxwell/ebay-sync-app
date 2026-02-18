@@ -397,9 +397,24 @@ const Pipeline: React.FC = () => {
           <Card>
             <div style={{ padding: '16px' }}>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">
-                  Live Pipeline Progress
-                </Text>
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text as="h2" variant="headingMd">
+                    Live Pipeline Progress
+                  </Text>
+                  <button
+                    onClick={async () => {
+                      await fetch('/api/pipeline/jobs/clear-stuck', { method: 'POST' });
+                      setActiveJobIds([]);
+                    }}
+                    style={{
+                      padding: '4px 12px', fontSize: '12px',
+                      background: '#6b7280', color: 'white',
+                      border: 'none', borderRadius: '4px', cursor: 'pointer',
+                    }}
+                  >
+                    Clear All
+                  </button>
+                </InlineStack>
                 {activeJobIds.map((jid) => (
                   <PipelineProgress
                     key={jid}
