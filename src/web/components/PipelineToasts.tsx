@@ -1,32 +1,49 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Toast, Frame } from '@shopify/polaris';
 
 /**
- * Global pipeline toast notifications.
- * Connects to `/api/pipeline/stream` SSE and shows toasts
- * for pipeline lifecycle events. Works across all pages.
+ * Persistent pipeline status bar.
+ * Sticks to the bottom of the screen showing all active pipeline jobs
+ * with real-time progress. Stays visible until jobs complete, then
+ * shows completion status for 10 seconds before fading.
  */
 
-interface ToastEntry {
-  id: string;
-  content: string;
-  error?: boolean;
-  duration?: number;
+interface ActiveJob {
+  jobId: string;
+  title: string;
+  status: 'running' | 'completed' | 'failed';
+  currentStep: string;
+  detail: string;
+  progress?: { current: number; total: number };
+  startedAt: number;
+  completedAt?: number;
 }
 
 const PipelineToasts: React.FC = () => {
-  const [toasts, setToasts] = useState<ToastEntry[]>([]);
-  const shownRef = useRef<Set<string>>(new Set());
-  // Track last progress detail per job to avoid spamming toasts
-  const lastProgressRef = useRef<Map<string, string>>(new Map());
+  const [jobs, setJobs] = useState<Map<string, ActiveJob>>(new Map());
+  const cleanupTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  const addToast = useCallback((content: string, error = false, duration = 5000) => {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    setToasts((prev) => [...prev, { id, content, error, duration }]);
+  const updateJob = useCallback((jobId: string, updates: Partial<ActiveJob>) => {
+    setJobs((prev) => {
+      const next = new Map(prev);
+      const existing = next.get(jobId) || {
+        jobId,
+        title: jobId,
+        status: 'running' as const,
+        currentStep: '',
+        detail: '',
+        startedAt: Date.now(),
+      };
+      next.set(jobId, { ...existing, ...updates });
+      return next;
+    });
   }, []);
 
-  const removeToast = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+  const removeJob = useCallback((jobId: string) => {
+    setJobs((prev) => {
+      const next = new Map(prev);
+      next.delete(jobId);
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -36,70 +53,202 @@ const PipelineToasts: React.FC = () => {
       try {
         const data = JSON.parse(msg.data);
         const { jobId, step, status, detail, progress, jobStatus, shopifyTitle } = data;
-        const name = shopifyTitle || jobId;
+        const title = shopifyTitle || jobId;
 
-        // Pipeline started
+        if (!jobId) return;
+
+        // Job started
         if (step === 'fetch_product' && status === 'running') {
-          const key = `start-${jobId}`;
-          if (!shownRef.current.has(key)) {
-            shownRef.current.add(key);
-            addToast(`Pipeline started for ${name}`);
-          }
+          // Clear any pending removal timer
+          const timer = cleanupTimers.current.get(jobId);
+          if (timer) { clearTimeout(timer); cleanupTimers.current.delete(jobId); }
+          updateJob(jobId, { title, status: 'running', currentStep: 'Fetching product...', detail: '' });
         }
 
-        // Image progress (throttle to every other image)
-        if (step === 'process_images' && progress && status === 'running') {
-          const progressKey = `${progress.current}/${progress.total}`;
-          const lastKey = lastProgressRef.current.get(jobId);
-          if (progressKey !== lastKey && (progress.current === 1 || progress.current % 2 === 0 || progress.current === progress.total)) {
-            lastProgressRef.current.set(jobId, progressKey);
-            addToast(`${name}: Photo ${progress.current}/${progress.total}`, false, 3000);
-          }
+        // Step updates
+        const stepLabels: Record<string, string> = {
+          fetch_product: 'Importing from Shopify',
+          generate_description: 'Generating AI description',
+          process_images: 'Processing photos',
+          create_ebay_listing: 'Creating draft',
+        };
+
+        if (step && status === 'running') {
+          const stepLabel = stepLabels[step] || step;
+          const progressText = progress ? ` (${progress.current}/${progress.total})` : '';
+          updateJob(jobId, {
+            title,
+            status: 'running',
+            currentStep: stepLabel + progressText,
+            detail: detail || '',
+            progress: progress || undefined,
+          });
         }
 
-        // TIM condition found
-        if (step === 'generate_description' && detail?.includes('condition:')) {
-          const key = `tim-${jobId}`;
-          if (!shownRef.current.has(key)) {
-            shownRef.current.add(key);
-            addToast(`${name}: ${detail}`, false, 4000);
-          }
+        if (step && status === 'done') {
+          const stepLabel = stepLabels[step] || step;
+          updateJob(jobId, {
+            title,
+            currentStep: `✅ ${stepLabel}`,
+            detail: detail || '',
+          });
+        }
+
+        // TIM condition
+        if (detail?.includes('condition:') || detail?.includes('Condition')) {
+          updateJob(jobId, { detail });
         }
 
         // Completed
         if (jobStatus === 'completed') {
-          const key = `done-${jobId}`;
-          if (!shownRef.current.has(key)) {
-            shownRef.current.add(key);
-            addToast(`✅ Draft ready for review — ${name}`, false, 8000);
-          }
+          updateJob(jobId, {
+            title,
+            status: 'completed',
+            currentStep: '✅ Draft ready for review',
+            detail: detail || '',
+            completedAt: Date.now(),
+          });
+          // Auto-remove after 10 seconds
+          const timer = setTimeout(() => removeJob(jobId), 10000);
+          cleanupTimers.current.set(jobId, timer);
         }
 
         // Failed
         if (jobStatus === 'failed') {
-          const key = `fail-${jobId}`;
-          if (!shownRef.current.has(key)) {
-            shownRef.current.add(key);
-            addToast(`❌ Pipeline failed: ${detail || 'unknown error'} — ${name}`, true, 10000);
-          }
+          updateJob(jobId, {
+            title,
+            status: 'failed',
+            currentStep: '❌ Failed',
+            detail: detail || 'Unknown error',
+            completedAt: Date.now(),
+          });
+          // Auto-remove after 15 seconds
+          const timer = setTimeout(() => removeJob(jobId), 15000);
+          cleanupTimers.current.set(jobId, timer);
         }
       } catch {}
     };
 
-    return () => es.close();
-  }, [addToast]);
+    return () => {
+      es.close();
+      cleanupTimers.current.forEach((t) => clearTimeout(t));
+    };
+  }, [updateJob, removeJob]);
 
-  // Only render the most recent toast (Polaris Toast stacks poorly)
-  const current = toasts[0];
-  if (!current) return null;
+  const activeJobs = Array.from(jobs.values());
+  if (activeJobs.length === 0) return null;
 
   return (
-    <Toast
-      content={current.content}
-      error={current.error}
-      duration={current.duration}
-      onDismiss={() => removeToast(current.id)}
-    />
+    <div style={{
+      position: 'fixed',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      zIndex: 9999,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '1px',
+    }}>
+      {activeJobs.map((job) => {
+        const elapsed = Math.floor(((job.completedAt || Date.now()) - job.startedAt) / 1000);
+        const bgColor = job.status === 'completed' ? '#16a34a'
+          : job.status === 'failed' ? '#dc2626'
+          : '#1a1a1a';
+
+        return (
+          <div key={job.jobId} style={{
+            background: bgColor,
+            color: 'white',
+            padding: '10px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: '13px',
+            fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+            transition: 'background 0.3s ease',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+              {job.status === 'running' && (
+                <div style={{
+                  width: '8px', height: '8px',
+                  borderRadius: '50%',
+                  background: '#fbbf24',
+                  animation: 'pulse 1.5s infinite',
+                }} />
+              )}
+              <span style={{ fontWeight: 600 }}>{job.title}</span>
+              <span style={{ opacity: 0.8 }}>—</span>
+              <span>{job.currentStep}</span>
+              {job.detail && job.status === 'running' && (
+                <span style={{ opacity: 0.6, fontSize: '12px' }}>{job.detail}</span>
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              {job.progress && job.status === 'running' && (
+                <div style={{
+                  width: '100px', height: '4px',
+                  background: 'rgba(255,255,255,0.2)',
+                  borderRadius: '2px',
+                  overflow: 'hidden',
+                }}>
+                  <div style={{
+                    width: `${(job.progress.current / job.progress.total) * 100}%`,
+                    height: '100%',
+                    background: '#fbbf24',
+                    borderRadius: '2px',
+                    transition: 'width 0.3s ease',
+                  }} />
+                </div>
+              )}
+              <span style={{ opacity: 0.6, fontSize: '12px' }}>
+                {elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`}
+              </span>
+              {job.status === 'running' && (
+                <button
+                  onClick={async () => {
+                    try {
+                      await fetch(`/api/pipeline/jobs/${job.jobId}/cancel`, { method: 'POST' });
+                      removeJob(job.jobId);
+                    } catch {}
+                  }}
+                  style={{
+                    background: 'rgba(255,255,255,0.15)',
+                    border: 'none',
+                    color: 'white',
+                    padding: '2px 8px',
+                    borderRadius: '3px',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+              {job.status !== 'running' && (
+                <button
+                  onClick={() => removeJob(job.jobId)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'rgba(255,255,255,0.6)',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+      `}</style>
+    </div>
   );
 };
 
