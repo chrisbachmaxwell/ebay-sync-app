@@ -1,375 +1,331 @@
-# PROJECT.md — eBay Sync App / Product Bridge
+# ProductPipeline — PROJECT.md
 
-> **Single source of truth** for the app's architecture, services, credentials, deployment, and current status.
+> **Last updated: 2026-02-18. Any agent working on this project MUST update this file before finishing.**
 
-## Overview
+## 1. Project Overview
 
-| Field | Value |
-|-------|-------|
-| **App Name** | Product Bridge (originally "eBay Sync App") |
-| **Purpose** | Shopify ↔ eBay sync + auto-listing pipeline for UsedCameraGear.com |
-| **Repos** | [mrfrankbot/ebay-sync-app](https://github.com/mrfrankbot/ebay-sync-app) (primary), [mrfrankbot/product-bridge](https://github.com/mrfrankbot/product-bridge) |
-| **Deployment** | Railway — `https://ebay-sync-app-production.up.railway.app` |
-| **Shopify Store** | `usedcameragear.myshopify.com` (usedcameragear.com / pictureline.com) |
-| **Shopify App** | Embedded app (App Bridge + Polaris), client ID `2db0555e4848a8264383dc0edfcfb8fe` |
-| **eBay Seller** | `usedcam-0` — https://www.ebay.com/usr/usedcam-0 |
-| **Version** | 0.2.0 |
-| **Tech Stack** | TypeScript, Express 5, React 19, Vite 7, SQLite (better-sqlite3 + drizzle-orm), Tailwind 4 |
+**ProductPipeline** (formerly "ebay-sync-app" / "Product Bridge") is a full-featured listing automation platform for **Pictureline's UsedCameraGear.com** store. It replaces Marketplace Connect (Codisto) for Shopify ↔ eBay integration.
 
-## Architecture (High-Level)
+**What it does:**
+- Watches a StyleShoots network drive for new product photos → auto-uploads to Shopify
+- Generates AI product descriptions via OpenAI GPT
+- Processes product images (background removal, templates) via self-hosted service or PhotoRoom API
+- Syncs products, inventory, prices, and orders between Shopify and eBay
+- Provides a web dashboard for review, approval, and management
+- Integrates TradeInManager condition data into listings
+- Draft/staging system with review queue before publishing
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  SHOPIFY (usedcameragear.myshopify.com)                         │
-│  - Products, Orders, Inventory                                   │
-│  - Webhooks → our server (products/update, orders/fulfilled)     │
-└──────────────────┬───────────────────────────────────────────────┘
-                   │  Shopify GraphQL + REST API
-                   ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  PRODUCT BRIDGE SERVER (Railway)                                 │
-│  Express + React SPA                                             │
-│                                                                  │
-│  ┌─────────────┐ ┌─────────────┐ ┌──────────────┐               │
-│  │ Sync Engines│ │ Pipeline    │ │ Embedded UI  │               │
-│  │ order-sync  │ │ AI Desc     │ │ Dashboard    │               │
-│  │ product-sync│ │ PhotoRoom   │ │ Listings     │               │
-│  │ inventory   │ │ eBay Create │ │ Pipeline     │               │
-│  │ price-sync  │ │             │ │ Settings     │               │
-│  │ fulfillment │ │             │ │ Analytics    │               │
-│  └─────────────┘ └─────────────┘ └──────────────┘               │
-│                                                                  │
-│  SQLite DB (~/.clawdbot/ebaysync.db)                            │
-└──────────────────┬───────────────────────────────────────────────┘
-                   │  eBay REST APIs (Inventory, Fulfillment, Browse)
-                   ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  EBAY (usedcam-0 seller account)                                │
-│  - Listings, Orders, Inventory, Promoted Listings               │
-│  - Platform Notifications → our server                           │
-└──────────────────────────────────────────────────────────────────┘
-```
+**Business context:** Pictureline photographs used camera gear on a StyleShoots machine. Products flow from Lightspeed POS → Shopify → need AI descriptions + processed photos → eBay listings. This app automates that entire pipeline.
 
-Detailed architecture docs: [ARCHITECTURE.md](./ARCHITECTURE.md) and [ARCHITECTURE_V2.md](./ARCHITECTURE_V2.md)
+**eBay seller:** usedcam-0 (https://www.ebay.com/usr/usedcam-0)
+**Shopify store:** usedcameragear.myshopify.com
 
-## Credentials
+## 2. Architecture
 
-All credentials live in `~/.clawdbot/credentials/`:
+### Tech Stack
 
-| File | Contents |
-|------|----------|
-| `shopify-usedcameragear-api.txt` | Shopify Client ID + Secret |
-| `ebay-api.txt` | eBay App ID, Dev ID, Cert ID, RuName |
-| `photoroom-api-key.txt` | PhotoRoom API key |
-| `railway-token.txt` | Railway deploy token |
+| Layer | Technology |
+|-------|-----------|
+| **Server** | Express 5 + TypeScript (ESM) |
+| **Frontend** | React 19 + Vite 7, Shopify Polaris, TailwindCSS 4, Zustand, React Query |
+| **Database** | SQLite via better-sqlite3 + Drizzle ORM |
+| **AI** | OpenAI API (GPT for descriptions, category suggestions) |
+| **Image Processing** | Self-hosted Python service (FastAPI) OR PhotoRoom API (factory pattern) |
+| **CLI** | Commander.js (`ebaysync` binary) |
+| **Deployment** | Railway |
 
-**Environment variables** (set on Railway):
-- `OPENAI_API_KEY` — GPT-4o-mini for AI descriptions + category suggestions
-- `PHOTOROOM_API_KEY` — Image processing (background removal, templates)
-- `PHOTOROOM_TEMPLATE_ID` — Default: `014ca360-cb57-416e-8c17-365a647ca4ac`
-- `PORT` — Server port (default 3000)
-
-**OAuth tokens** stored in SQLite `auth_tokens` table (auto-refreshed):
-- Shopify access token (long-lived)
-- eBay access + refresh tokens (auto-refreshed via `token-manager.ts`)
-
-## Key Services
-
-### 1. PhotoRoom (`src/services/photoroom.ts`)
-- **Background removal**: `POST https://sdk.photoroom.com/v1/segment`
-- **Image editing** (white bg, shadow, padding): `POST https://image-api.photoroom.com/v2/edit`
-- **Template rendering**: `POST https://image-api.photoroom.com/v1/render`
-- Falls back to original Shopify image URLs if API key not set
-
-### 2. OpenAI (`src/sync/auto-listing-pipeline.ts`)
-- **Model**: `gpt-4o-mini`
-- **Description generation**: Professional used-camera-gear copywriting (configurable system prompt stored in `settings` table)
-- **Category suggestion**: Returns eBay category ID based on product name
-- Both run in parallel during pipeline execution
-
-### 3. eBay API (`src/ebay/`)
-- **Inventory API** — create/update listings, manage offers and inventory items
-- **Fulfillment API** — order fetching, shipping fulfillments
-- **Browse API** — search/read listings
-- **Trading API** — business policies (legacy)
-- **Token Manager** — automatic OAuth refresh
-
-### 4. Shopify API (`src/shopify/`)
-- **GraphQL client** — product listing queries
-- **REST API** — product details, order creation, inventory levels, image upload
-- **Webhooks** — products/update, orders/fulfilled, inventory_levels/update
-
-## Auto-Listing Pipeline
-
-**File**: `src/sync/auto-listing-pipeline.ts`
-**API endpoint**: `POST /api/auto-list/{shopifyProductId}` (via pipeline routes)
-
-### Pipeline Steps
+### Directory Structure
 
 ```
-Step 1: Fetch Product       → Shopify REST API → get title, vendor, images, variants
-Step 2: Generate Description → OpenAI GPT-4o-mini → professional product description
-         + Category Suggestion  → OpenAI GPT-4o-mini → eBay category ID
-Step 3: Process Images       → PhotoRoom API → background removal + white bg + shadow
-Step 4: Save Overrides       → SQLite → description + category stored as product overrides
+src/
+├── cli/            # CLI commands (ebaysync)
+├── config/         # Credential loading (~/.clawdbot/credentials/)
+├── db/             # SQLite database + Drizzle schema
+├── ebay/           # eBay API clients (REST: fulfillment, inventory, browse, trading)
+├── server/         # Express server + routes + middleware
+│   ├── routes/     # API endpoints (15+ route modules)
+│   ├── middleware/  # Auth (API key + rate limiting)
+│   └── capabilities.ts  # Auto-discovery registry for chat + UI
+├── services/       # Business logic services
+│   ├── image-service-factory.ts  # Factory: self-hosted vs PhotoRoom
+│   ├── local-photoroom.ts        # Self-hosted image service client
+│   ├── photoroom.ts              # PhotoRoom API client
+│   ├── draft-service.ts          # Draft/staging/approval workflow
+│   ├── tim-service.ts            # TradeInManager API client
+│   ├── tim-matching.ts           # Match TIM items to Shopify products
+│   ├── tim-tagging.ts            # Auto-tag products with TIM conditions
+│   ├── photo-templates.ts        # Photo processing templates
+│   └── image-processor.ts        # Image processing orchestration
+├── shopify/        # Shopify API (GraphQL + REST)
+├── sync/           # Sync engines (orders, products, inventory, prices, fulfillment)
+│   ├── auto-listing-pipeline.ts  # Main pipeline: AI desc + images + eBay category
+│   ├── category-mapper.ts        # Shopify → eBay category mapping
+│   ├── listing-manager.ts        # eBay listing CRUD
+│   └── pipeline-status.ts        # Job tracking
+├── utils/          # Logger, retry with backoff
+├── watcher/        # StyleShoots folder watcher (chokidar)
+│   ├── index.ts         # Main watcher loop
+│   ├── folder-parser.ts # Parse folder names for product info
+│   ├── stabilizer.ts    # Wait for folder to stop changing (30s)
+│   ├── shopify-matcher.ts # Fuzzy match folders → Shopify products
+│   ├── shopify-uploader.ts # Upload images to Shopify
+│   ├── drive-search.ts  # Search StyleShoots drive for product photos
+│   └── watcher-db.ts    # Watch log persistence
+└── web/            # React frontend
+    ├── pages/      # Dashboard, Pipeline, ReviewQueue, ReviewDetail, Listings,
+    │               # ShopifyProducts, EbayOrders, Orders, ImageProcessor,
+    │               # CategoryMapping, Analytics, Settings, Help*, Feature*
+    ├── components/ # PhotoGallery, ChatWidget, TemplateManager, etc.
+    └── store/      # Zustand state management
 ```
 
-### Pipeline Tracking
-- Each run creates a `pipeline_jobs` record with step-by-step status
-- `product_pipeline_status` table tracks per-product AI/image state
-- Pipeline UI at `/pipeline` shows real-time job progress
+### Self-Hosted Image Service
 
-### Image Processing Detail
-1. Fetches each Shopify image URL
-2. Sends to PhotoRoom template render API
-3. Saves processed PNG to temp directory (`/tmp/ebay-sync-images/{productId}/`)
-4. Returns array of processed file paths (or falls back to original URLs)
+Located at `~/projects/product-pipeline/image-service/` — a separate Python FastAPI app:
+- Background removal (rembg or similar)
+- Image processing (resize, pad, shadow)
+- Template rendering
+- Docker-based deployment
+- Concurrency-controlled with semaphores
+- Health/metrics endpoints
 
-## Database
-
-**Location**: `~/.clawdbot/ebaysync.db` (SQLite via better-sqlite3)
+### Database Schema (SQLite)
 
 | Table | Purpose |
 |-------|---------|
 | `auth_tokens` | OAuth tokens for Shopify + eBay |
-| `product_mappings` | Shopify product ↔ eBay listing links (with cached title/price/SKU) |
-| `product_pipeline_status` | Per-product AI description + image processing state |
-| `pipeline_jobs` | Auto-listing pipeline job tracking (step-by-step) |
-| `order_mappings` | eBay order ↔ Shopify order links (dedup) |
+| `product_mappings` | Shopify ↔ eBay listing links, cached prices/SKUs |
+| `order_mappings` | eBay → Shopify order dedup |
 | `sync_log` | Audit trail of all sync operations |
-| `field_mappings` | Configurable field/condition/category mappings |
-| `attribute_mappings` | Extended attribute mapping system (sales/listing/payment/shipping categories) |
-| `product_mapping_overrides` | Per-product overrides for description, category, etc. |
-| `notification_log` | eBay notification + Shopify webhook history |
-| `settings` | Key/value store for sync config + UI settings |
-| `help_questions` | Help center Q&A content |
-| `feature_requests` | User feature request tracking |
+| `product_pipeline_status` | AI description + image processing status per product |
+| `pipeline_jobs` | Pipeline job queue with step tracking |
+| `product_drafts` | Draft/staging system for review before publish |
+| `auto_publish_settings` | Per-product-type auto-publish rules |
+| `styleshoot_watch_log` | Folder watcher activity log |
+| `field_mappings` | Category, condition, field mappings (Shopify ↔ eBay) |
+| `photo_templates` | Saved image processing parameter templates |
+| `image_processing_log` | Per-image processing status and results |
 
-## API Endpoints
+DB location: `src/db/product-pipeline.db` (dev), `~/.clawdbot/ebaysync.db` (production)
 
-### Core Sync
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/sync/products` | Sync Shopify products → eBay listings |
-| `PUT` | `/api/sync/products/:id` | Update existing eBay listing from Shopify |
-| `POST` | `/api/sync/products/:id/end` | End an eBay listing |
-| `POST` | `/api/sync/inventory` | Sync inventory Shopify → eBay |
-| `POST` | `/api/sync/inventory/:sku` | Sync specific SKU inventory |
-| `POST` | `/api/sync/prices` | Sync prices Shopify → eBay |
-| `POST` | `/api/sync/trigger` | Manual full sync trigger |
+## 3. Current State
 
-### Auto-Listing Pipeline
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/auto-list/:id` | Run auto-listing pipeline for a Shopify product |
-| `GET` | `/api/pipeline/jobs` | List all pipeline jobs |
-| `GET` | `/api/pipeline/jobs/:id` | Get single pipeline job status |
+### Feature Status
 
-### Listing Management
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/listings/republish-stale` | Republish listings older than N days |
-| `POST` | `/api/listings/apply-price-drops` | Apply price drops to eligible listings |
-| `POST` | `/api/listings/promote` | Enable Promoted Listings |
-| `GET` | `/api/listings/stale` | Get stale listings eligible for action |
-| `GET` | `/api/listings/health` | Listing health dashboard data |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **StyleShoots Watcher** | ✅ Working | Watches `/Volumes/StyleShootsDrive/UsedCameraGear/`, auto-uploads to Shopify |
+| **AI Descriptions** | ✅ Working | OpenAI GPT generates product descriptions with TIM condition data |
+| **Image Processing** | ✅ Working | Factory pattern: self-hosted (preferred) or PhotoRoom fallback |
+| **Draft/Review System** | ✅ Working | Full approval workflow with review queue UI |
+| **eBay Order Import** | ✅ Working | eBay → Shopify with dedup (DB + tag-based) |
+| **Product Sync (→ eBay)** | ✅ Working | Shopify → eBay listing creation |
+| **Inventory Sync** | ✅ Working | Shopify → eBay quantity sync |
+| **Price Sync** | ✅ Working | Shopify → eBay price sync |
+| **Fulfillment Sync** | ✅ Working | Shopify → eBay shipping updates |
+| **TIM Integration** | ✅ Working | Fetches condition data, auto-tags Shopify products |
+| **Photo Templates** | ✅ Working | Saveable processing presets per category |
+| **Chat Widget** | ✅ Working | AI-powered help chat with capability awareness |
+| **Category Mapping UI** | ✅ Working | StyleShoots preset → Shopify/eBay category mapping |
+| **Manual Pipeline Trigger** | ✅ Working | Drive search + draft product support |
+| **Web Dashboard** | ✅ Working | Full React UI with Polaris components |
+| **Help Center** | ✅ Working | Built-in help system with admin |
+| **Feature Requests** | ✅ Working | User-facing feature request/voting system |
+| **eBay Notifications** | ✅ Implemented | Webhook endpoint for eBay platform notifications |
+| **Analytics** | ✅ Basic | Recharts-based analytics page |
 
-### Data & Config
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/status` | Overall sync status overview |
-| `GET` | `/api/products/overview` | Unified Shopify + pipeline + eBay status |
-| `GET/PUT` | `/api/settings` | Read/update app settings |
-| `GET/PUT` | `/api/mappings` | Attribute mapping CRUD |
-| `GET` | `/api/listings` | Paginated product listings |
-| `GET` | `/api/orders` | Imported order history |
+### Recent Work (git log)
 
-### Webhooks
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/webhooks/shopify/*` | Shopify webhook receiver (product/order/inventory events) |
-| `POST` | `/webhooks/ebay/*` | eBay Platform Notification receiver |
+1. **Self-hosted image processing** — Factory pattern for local vs PhotoRoom (latest)
+2. **Manual pipeline trigger** — Drive search + draft product support
+3. **TIM condition tags** — Auto-tag Shopify products with trade-in condition data
+4. **TIM integration** — Fetch condition data from trades.pictureline.com
+5. **Review queue redesign** — Full-page Shopify-style review detail
+6. **Product dedup fix** — 105 duplicate products from Shopify API
+7. **eBay Orders import** — Browse + import eBay orders
+8. **Product Notes** — Notes feature for products
+9. **Pipeline review modal** — Inline approve description, photos, eBay listing
 
-## Embedded UI (React SPA)
+### Known Issues
 
-Built with React 19 + Shopify Polaris + Tailwind CSS + Recharts.
+- CORS still references old Railway domain (`ebay-sync-app-production.up.railway.app`)
+- Logs page disabled (`.tsx.bak`)
+- GitHub repo not yet renamed from original name
 
-| Page | Route | Purpose |
-|------|-------|---------|
-| Dashboard | `/` | Sync status, stats, connections, recent activity |
-| Pipeline | `/pipeline` | Auto-listing pipeline job manager + 4-stage visualizer |
-| eBay Listings | `/ebay/listings` | Product listing management (active/draft/missing) |
-| Shopify Products | `/products` | Shopify product browser with pipeline status |
-| Mappings | `/mappings` | Attribute mapping configuration |
-| Analytics | `/logs` | Listing health, sync history, error log |
-| Settings | `/settings` | Connections, sync config, AI prompt editor |
-| Help Center | `/help` | Help articles + AI-powered Q&A |
-| Help Admin | `/help-admin` | Manage help center content |
-| Feature Requests | `/features` | User feature request board |
-| Image Processor | `/images` | Standalone PhotoRoom image testing |
+## 4. Key Integrations
 
-## Project Structure
+### Shopify API
+- **Client:** `@shopify/shopify-api` (GraphQL + REST)
+- **Store:** usedcameragear.myshopify.com
+- **Auth:** OAuth flow via `/auth/shopify` routes, tokens stored in DB
+- **Operations:** Products CRUD, image upload, order creation, inventory management, metafields
+- **Webhooks:** Product create/update/delete at `/webhooks/shopify`
 
+### eBay API
+- **Auth:** OAuth2 with token auto-refresh (`token-manager.ts`)
+- **APIs used:** Fulfillment (orders), Inventory (items + offers), Browse (search), Trading (account/policies)
+- **Seller:** usedcam-0
+- **Webhooks:** Platform notifications at `/webhooks/ebay`
+
+### Image Processing
+- **Primary:** Self-hosted FastAPI service (`image-service/`) — background removal, processing, templates
+  - URL configurable via `IMAGE_SERVICE_URL` (default: `http://localhost:8100`)
+  - Docker-based, concurrency-controlled
+- **Fallback:** PhotoRoom API (requires `PHOTOROOM_API_KEY`)
+- **Selection:** `IMAGE_PROCESSOR` env var: `self-hosted` | `photoroom` | `auto` (default)
+- **Factory:** `image-service-factory.ts` handles provider selection with health checks
+
+### StyleShoots Drive
+- **Watch path:** `/Volumes/StyleShootsDrive/UsedCameraGear/`
+- **Flow:** Folder appears → stabilize 30s → parse folder name → fuzzy match Shopify product → upload images
+- **Preset folders** map to product categories (e.g. "Trade-Ins - Small Lenses")
+- **SMB mount** with reconnect handling
+
+### TradeInManager (TIM)
+- **URL:** https://trades.pictureline.com
+- **Auth:** Session-based login (mrfrankbot@gmail.com, password in `~/.clawdbot/credentials/tradeinmanager.txt`)
+- **Data:** Condition grades, grader notes, serial numbers, pricing
+- **Matching:** SKU-based matching between TIM items and Shopify products
+- **Auto-tagging:** Applies condition tags to Shopify products
+
+### OpenAI
+- **Purpose:** Generate product descriptions, suggest eBay categories
+- **Model:** GPT (via `openai` npm package)
+- **Context:** Includes product title, vendor, TIM condition data, product notes
+
+## 5. Configuration & Environment
+
+### Credentials (file-based)
+
+All stored in `~/.clawdbot/credentials/`:
+
+| File | Contents |
+|------|----------|
+| `ebay-api.txt` | App ID, Dev ID, Cert ID, RuName |
+| `shopify-usedcameragear-api.txt` | Client ID, Client Secret |
+| `tradeinmanager.txt` | TIM login password |
+
+### Environment Variables
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `PORT` | Server port | `3000` |
+| `OPENAI_API_KEY` | OpenAI API for AI descriptions | Required |
+| `PHOTOROOM_API_KEY` | PhotoRoom API key (fallback image processor) | Optional |
+| `IMAGE_PROCESSOR` / `IMAGE_SERVICE` | Image provider: `self-hosted`, `photoroom`, `auto` | `auto` |
+| `IMAGE_SERVICE_URL` | Self-hosted image service URL | `http://localhost:8100` |
+| `EBAY_APP_ID` | eBay App ID (overrides credential file) | From file |
+| `EBAY_DEV_ID` | eBay Dev ID | From file |
+| `EBAY_CERT_ID` | eBay Cert ID | From file |
+| `EBAY_RU_NAME` | eBay Redirect URI Name | From file |
+| `SHOPIFY_CLIENT_ID` | Shopify Client ID | From file |
+| `SHOPIFY_CLIENT_SECRET` | Shopify Client Secret | From file |
+
+### Deployment (Railway)
+
+- Server runs `npm run build && npm start`
+- Build: `tsc` (server) + `vite build` (frontend)
+- Static frontend served by Express from `dist/web/`
+- Domain: `ebay-sync-app-production.up.railway.app` (needs rename)
+- SQLite DB persists on Railway volume
+
+## 6. How to Continue
+
+### Local Dev Setup
+
+```bash
+cd ~/projects/product-pipeline
+npm install
+
+# Start dev server (auto-reloads)
+npm run dev          # Server at http://localhost:3000
+
+# Or run server + web separately:
+npm run dev:server   # Express API
+npm run dev:web      # Vite dev server (HMR)
+
+# For image processing, also start the image service:
+cd image-service
+docker compose up    # or: python server.py
 ```
-src/
-├── cli/               # CLI commands (Commander.js) — debug/admin tool
-│   ├── index.ts       # Entry point + full sync command
-│   ├── auth.ts        # auth shopify / auth ebay
-│   ├── products.ts    # products list / products sync
-│   ├── orders.ts      # orders sync / orders list
-│   ├── inventory.ts   # inventory sync
-│   └── status.ts      # Dashboard with counts
-├── server/            # Express web server
-│   ├── index.ts       # App entry, middleware, scheduler
-│   ├── capabilities.ts # Feature discovery
-│   ├── sync-helper.ts # Background sync utilities
-│   ├── middleware/
-│   │   └── auth.ts    # API key + rate limiting
-│   └── routes/
-│       ├── api.ts     # Core REST API (status, listings, orders, settings, sync, mappings)
-│       ├── pipeline.ts # Pipeline job API
-│       ├── shopify-auth.ts     # Shopify OAuth install/callback
-│       ├── ebay-auth.ts        # eBay OAuth flow
-│       ├── shopify-webhooks.ts # Shopify webhook handlers
-│       ├── ebay-notifications.ts # eBay Platform Notification handlers
-│       ├── chat.ts    # AI chat assistant API
-│       ├── help.ts    # Help center API
-│       ├── features.ts # Feature requests API
-│       └── health.ts  # Health check
-├── web/               # React SPA (Shopify embedded app)
-│   ├── App.tsx        # Root with routing
-│   ├── main.tsx       # Vite entry
-│   ├── pages/         # Dashboard, Pipeline, Listings, etc.
-│   ├── components/    # Shared UI components
-│   ├── hooks/         # useApi, etc.
-│   └── store/         # Zustand state management
-├── sync/              # Core sync engines
-│   ├── auto-listing-pipeline.ts  # Full auto-list pipeline (AI + images + eBay)
-│   ├── pipeline-status.ts        # Pipeline job tracking
-│   ├── product-sync.ts           # Shopify → eBay product sync
-│   ├── order-sync.ts             # eBay → Shopify order import
-│   ├── inventory-sync.ts         # Shopify → eBay quantity sync
-│   ├── price-sync.ts             # Shopify → eBay price sync
-│   ├── fulfillment-sync.ts       # Shopify → eBay shipping updates
-│   ├── listing-manager.ts        # Republish stale, price drops, promoted listings
-│   ├── mapper.ts                 # Field mapping (condition, category, carrier)
-│   ├── mapping-service.ts        # Mapping CRUD service
-│   ├── attribute-mapping-service.ts # Extended attribute mapping
-│   ├── category-mapper.ts        # eBay category mapping
-│   └── aspect-mapper.ts          # eBay item aspects mapping
-├── services/          # External service integrations
-│   ├── photoroom.ts   # PhotoRoom API (bg removal, templates)
-│   └── image-processor.ts # Image processing orchestrator
-├── ebay/              # eBay API clients
-│   ├── client.ts      # Base HTTP client + token exchange
-│   ├── auth.ts        # OAuth consent flow
-│   ├── token-manager.ts # Auto-refresh expired tokens
-│   ├── inventory.ts   # Inventory API (items + offers)
-│   ├── fulfillment.ts # Fulfillment API (orders + shipping)
-│   ├── browse.ts      # Browse API (search listings)
-│   ├── trading.ts     # Account/Trading API (business policies)
-│   └── notifications.ts # Platform Notification management
-├── shopify/           # Shopify API clients
-│   ├── client.ts      # GraphQL + REST client setup
-│   ├── products.ts    # Product fetching (GraphQL + REST, pagination)
-│   ├── orders.ts      # Order creation + dedup search
-│   └── inventory.ts   # Inventory levels + locations
-├── db/                # SQLite database
-│   ├── client.ts      # DB connection + table initialization
-│   └── schema.ts      # Drizzle ORM schema definitions
-├── config/
-│   └── credentials.ts # Load credentials from ~/.clawdbot/credentials/
-└── utils/
-    ├── logger.ts      # Colored structured logging
-    └── retry.ts       # Retry with exponential backoff
+
+### CLI Usage
+
+```bash
+npm run cli -- status              # Dashboard
+npm run cli -- orders sync         # Sync eBay orders
+npm run cli -- products sync       # Sync products to eBay
+npm run cli -- inventory sync      # Sync inventory
 ```
 
-## StyleShoots Integration
+### Deploy
 
-| Field | Value |
-|-------|-------|
-| **Drive** | `smb://192.168.15.243/StyleShootsDrive` |
-| **Mount Point** | `/Volumes/StyleShootsDrive` |
-| **Photo Folder** | `/Volumes/StyleShootsDrive/UsedCameraGear/` |
-| **Naming Convention** | `"product name #lastThreeSerialDigits"` (e.g. `sigma 24-70 #624`) |
+```bash
+# Railway auto-deploys from git push
+git push origin main
 
-Photos from the StyleShoots machine are saved to a shared network drive. A future folder watcher module will watch for new product folders, match them to Shopify products, and feed local photos into the auto-listing pipeline.
+# Manual: Railway CLI
+railway up
+```
 
-See [STYLESHOOT_WATCHER_DESIGN.md](./STYLESHOOT_WATCHER_DESIGN.md) for the design.
+### Adding New Features
 
-## What's Working ✅
+1. Add API route in `src/server/routes/`
+2. Register capability in `src/server/capabilities.ts` (auto-surfaces in chat + UI)
+3. Add frontend page in `src/web/pages/`, route in `App.tsx`
+4. Add nav item in `AppNavigation.tsx`
+5. Update DB schema in `src/db/schema.ts` if needed
 
-- **Shopify OAuth** — Full install/callback flow, token stored in DB
-- **eBay OAuth** — Consent flow with auto-refresh token management
-- **Order Sync** (eBay → Shopify) — Imports eBay orders as Shopify orders with dedup
-- **Product Sync** (Shopify → eBay) — Creates/updates eBay listings from Shopify products
-- **Inventory Sync** — Shopify quantities pushed to eBay
-- **Price Sync** — Shopify prices pushed to eBay
-- **Fulfillment Sync** — Shopify shipments marked on eBay
-- **Auto-Listing Pipeline** — AI description + category suggestion + PhotoRoom image processing
-- **Pipeline Status Tracking** — Real-time job status with 4-stage visualizer
-- **Embedded Shopify UI** — Full React SPA (Dashboard, Pipeline, Listings, Analytics, Settings, Help)
-- **Attribute Mapping System** — Configurable field/condition/category mappings with per-product overrides
-- **Listing Management** — Stale listing republish, price drop scheduling, Promoted Listings
-- **Background Scheduler** — Auto-sync with configurable interval (disabled by default)
-- **Webhook Receivers** — Shopify webhooks + eBay Platform Notifications
-- **Help Center** — AI-powered Q&A with admin content management
-- **API Security** — API key auth, rate limiting, CORS, webhook HMAC verification
-- **830+ products** loaded from Shopify, 1 draft listing on eBay (Sony FE 50mm)
-- **Railway Deployment** — `ebay-sync-app-production.up.railway.app`
+### Testing
 
-## What's Left / TODO 🚧
+```bash
+npm test              # vitest run
+npm run test:watch    # vitest watch mode
+```
 
-### High Priority
-- **Bulk eBay listing creation** — Pipeline works per-product; need batch auto-list for all 830+ products
-- **eBay listing publish** — Currently saves as draft/overrides; full eBay Inventory API publish not wired end-to-end
-- **Shopify image upload** — `uploadToShopify()` in `image-processor.ts` is a stub; processed images aren't written back to Shopify
-- **StyleShoots folder watcher** — Designed but not built (see `STYLESHOOT_WATCHER_DESIGN.md`)
-- **eBay Platform Notifications** — Receiver exists but subscription setup + signature verification need testing with real events
+Test files: `src/services/__tests__/`
 
-### Medium Priority
-- **Error recovery** — Pipeline failures don't auto-retry; need retry queue
-- **Image upload to eBay** — Pipeline processes images to local temp files but doesn't upload to eBay Inventory API `pictureURLs`
-- **Full sync scheduling** — Auto-sync exists but only does order sync; inventory/price/fulfillment sync not in scheduler
-- **Shopify webhooks registration** — Webhook receiver works but webhook subscriptions aren't auto-registered on install
-- **Test coverage** — No automated tests; manual QA only (see `QC_REPORT.md`)
+## 7. Decision Log
 
-### Nice to Have
-- **Condition detection from photos** — Use AI/vision to assess item condition from StyleShoots photos
-- **Batch PhotoRoom processing** — Parallel image processing for faster throughput
-- **Price history tracking** — Track price changes over time for analytics
-- **Multi-store support** — Currently hardcoded to `usedcameragear.myshopify.com`
-- **CLI deprecation** — CLI still works but UI is primary; could simplify
-- **Real-time UI updates** — Socket.io client is imported but not wired to server-side events
+| Decision | Rationale |
+|----------|-----------|
+| **SQLite over Postgres** | Single-user app, Railway volume support, zero-config, fast |
+| **Drizzle ORM** | Type-safe, lightweight, great SQLite support |
+| **Express 5** | Familiar, async route support, serves both API + static frontend |
+| **Factory pattern for images** | Self-hosted service saves PhotoRoom API costs; factory enables seamless fallback |
+| **File-based credentials** | Predates env vars; supports both now (env overrides files) |
+| **Draft/staging system** | Chris wanted to review AI descriptions before publishing to Shopify |
+| **Capability registry** | Chat widget and UI auto-discover features; no manual prompt maintenance |
+| **Chokidar watcher** | Reliable cross-platform file watching with debounce/stabilization |
+| **Rename from "ebay-sync-app"** | Scope grew far beyond eBay sync; now a full product pipeline |
+| **TIM integration** | Condition data from trade-ins improves AI description quality |
 
-## Agent Conventions
+## 8. Next Steps
 
-**ALL agents working on this project MUST follow these rules:**
+**Prioritized remaining work:**
 
-1. **Always commit AND push** — Every agent commits with a descriptive message AND runs `git push origin main` before finishing
-2. **Read PROJECT.md first** — This file is the single source of truth
-3. **Read STYLESHOOT_WATCHER_DESIGN.md** for watcher-related work
-4. **Run `npm run build`** before committing — don't push broken code
-5. **Update PROJECT.md** if you add new endpoints, tables, services, or major features
-6. **Repo remotes:** `origin` = github.com/mrfrankbot/ebay-sync-app
-7. **Branch:** work on `main` unless told otherwise
-8. **Don't use sleep commands** — work quickly and efficiently
+1. **Rename Railway domain** — Still using `ebay-sync-app-production.up.railway.app`
+2. **Rename GitHub repo** — Match new ProductPipeline name
+3. **Re-enable Logs page** — Currently `.tsx.bak`, needs fix
+4. **eBay listing creation** — Full automated Shopify → eBay listing push (partially implemented in `listing-manager.ts`)
+5. **Image service deployment** — Deploy self-hosted image service to Railway alongside main app
+6. **Auto-pipeline trigger** — Automatically run pipeline when StyleShoots watcher detects + uploads photos
+7. **Batch operations** — Process multiple products through pipeline at once
+8. **eBay category mapping improvements** — Better auto-suggestion, more category coverage
+9. **Webhook reliability** — Retry/queue for failed Shopify/eBay webhooks
+10. **Auth hardening** — Current API key auth is basic; consider proper session auth for web UI
 
-## Related Docs
+## Recent Changes
 
-| Doc | Description |
-|-----|-------------|
-| [README.md](./README.md) | CLI usage and quick start |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Original CLI architecture (v1) |
-| [ARCHITECTURE_V2.md](./ARCHITECTURE_V2.md) | Embedded app architecture (v2 — current) |
-| [STYLESHOOT_WATCHER_DESIGN.md](./STYLESHOOT_WATCHER_DESIGN.md) | Folder watcher module design |
-| [QC_REPORT.md](./QC_REPORT.md) | Latest QA test report (Feb 13, 2026) |
-| [CODEX_DASHBOARD_REDESIGN.md](./CODEX_DASHBOARD_REDESIGN.md) | Dashboard redesign spec |
-| [CODEX_PRODUCTS_REDESIGN.md](./CODEX_PRODUCTS_REDESIGN.md) | Products page redesign spec |
-| [MAPPING_SYSTEM_COMPLETE.md](./MAPPING_SYSTEM_COMPLETE.md) | Mapping system documentation |
-| [SECURITY_AUDIT.md](./SECURITY_AUDIT.md) | Security review |
-| [UI_DESIGN_PLAN.md](./UI_DESIGN_PLAN.md) | UI/UX design specifications |
-
----
-
-*Last updated: February 16, 2026*
+### 2026-02-18: Product Detail Page Redesign
+Redesigned `ShopifyProductDetail` in `src/web/pages/ShopifyProducts.tsx` to match ReviewDetail quality:
+- **Single CTA**: "Run Pipeline" appears only in page header (removed from Quick Actions and sidebar)
+- **Removed Quick Actions card**: External links moved to page `secondaryActions`
+- **Status badges in title**: TIM Condition and eBay status shown as compact badges next to product title
+- **Pipeline as sidebar hero**: Pipeline progress tracker is now the top sidebar card
+- **Beautiful empty states**: Photos section shows a dashed drop-zone with Drive search CTA when empty
+- **Conditional cards**: TIM Condition and eBay cards only render when data exists (no empty cards)
+- **Consolidated Details card**: Merged product info into a single compact card, tags shown inline
+- **Subtle animations**: Fade-in animation on page load
+- **Consistent spacing**: `gap="400"` throughout, matching ReviewDetail patterns
+- **All functionality preserved**: No features removed, only visual reorganization
