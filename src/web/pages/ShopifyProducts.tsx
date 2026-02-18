@@ -21,6 +21,7 @@ import {
   Thumbnail,
   Tooltip,
   Icon,
+  useIndexResourceState,
 } from '@shopify/polaris';
 import { ExternalLink, Filter, Play, Search, SortAsc, SortDesc } from 'lucide-react';
 import {
@@ -1467,6 +1468,42 @@ const ShopifyProducts: React.FC = () => {
   const currentPage = Math.min(page, totalPages);
   const pageItems = sorted.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
+  const { selectedResources, allResourcesSelected, handleSelectionChange } =
+    useIndexResourceState(pageItems, { resourceIDResolver: (p) => p.shopifyProductId });
+
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; current?: string } | null>(null);
+
+  const handleBulkRunPipeline = useCallback(async () => {
+    const ids = selectedResources;
+    if (ids.length === 0) return;
+    setBulkRunning(true);
+    setBulkProgress({ done: 0, total: ids.length });
+    for (let i = 0; i < ids.length; i++) {
+      const product = pageItems.find((p) => p.shopifyProductId === ids[i]);
+      setBulkProgress({ done: i, total: ids.length, current: product?.title || ids[i] });
+      try {
+        await fetch(`/api/pipeline/trigger/${ids[i]}`, { method: 'POST' });
+      } catch {
+        // continue with next
+      }
+    }
+    setBulkProgress({ done: ids.length, total: ids.length });
+    setBulkRunning(false);
+    setTimeout(() => setBulkProgress(null), 3000);
+    handleSelectionChange('page' as any, false);
+  }, [selectedResources, pageItems, handleSelectionChange]);
+
+  const bulkActions = [
+    {
+      content: bulkRunning
+        ? `Running pipeline (${bulkProgress?.done ?? 0}/${bulkProgress?.total ?? 0})...`
+        : `Run Pipeline (${selectedResources.length})`,
+      onAction: handleBulkRunPipeline,
+      disabled: bulkRunning,
+    },
+  ];
+
   const handleTabChange = useCallback((index: number) => {
     if (index >= 0 && index < TAB_FILTERS.length) {
       setSelectedTab(index);
@@ -1479,6 +1516,7 @@ const ShopifyProducts: React.FC = () => {
       id={product.shopifyProductId}
       key={product.shopifyProductId}
       position={index}
+      selected={selectedResources.includes(product.shopifyProductId)}
       onClick={() => navigate(`/listings/${product.shopifyProductId}`)}
     >
       <IndexTable.Cell>
@@ -1569,7 +1607,10 @@ const ShopifyProducts: React.FC = () => {
             <IndexTable
               resourceName={{ singular: 'product', plural: 'products' }}
               itemCount={pageItems.length}
-              selectable={false}
+              selectable={true}
+              selectedItemsCount={allResourcesSelected ? 'All' : selectedResources.length}
+              onSelectionChange={handleSelectionChange}
+              bulkActions={bulkActions}
               headings={[
                 { title: 'Product' },
                 { title: 'Price' },
