@@ -9,7 +9,7 @@ import {
   Spinner,
   Banner,
 } from '@shopify/polaris';
-import { RotateCw, Move, ZoomIn, RotateCcw } from 'lucide-react';
+import { RotateCw, Move, ZoomIn } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -292,7 +292,6 @@ const ProductPhotoEditor: React.FC<ProductPhotoEditorProps> = ({
         {
           content: 'Reset',
           onAction: () => setTransform({ ...DEFAULT_TRANSFORM }),
-          icon: RotateCcw,
         },
         { content: 'Cancel', onAction: onClose },
       ]}
@@ -360,10 +359,9 @@ const ProductPhotoEditor: React.FC<ProductPhotoEditorProps> = ({
                       max={180}
                       step={1}
                       value={transform.rotation}
-                      onChange={(val) =>
-                        setTransform((prev) => ({ ...prev, rotation: val as number }))
+                      onChange={(val: number) =>
+                        setTransform((prev) => ({ ...prev, rotation: typeof val === 'number' ? val : Number(val) }))
                       }
-                      output
                     />
                   </div>
                 </InlineStack>
@@ -379,10 +377,9 @@ const ProductPhotoEditor: React.FC<ProductPhotoEditorProps> = ({
                       max={150}
                       step={1}
                       value={Math.round(transform.scale * 100)}
-                      onChange={(val) =>
-                        setTransform((prev) => ({ ...prev, scale: (val as number) / 100 }))
+                      onChange={(val: number) =>
+                        setTransform((prev) => ({ ...prev, scale: (typeof val === 'number' ? val : Number(val)) / 100 }))
                       }
-                      output
                     />
                   </div>
                 </InlineStack>
