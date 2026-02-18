@@ -19,12 +19,17 @@ import {
   Text,
   TextField,
   Thumbnail,
+  Tooltip,
+  Icon,
 } from '@shopify/polaris';
 import { ExternalLink, Filter, Play, Search, SortAsc, SortDesc } from 'lucide-react';
 import {
   SearchIcon,
   CheckCircleIcon,
   ExternalSmallIcon,
+  ImageIcon,
+  NoteIcon,
+  EditIcon,
 } from '@shopify/polaris-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -36,7 +41,6 @@ import ActivePhotosGallery, { type ActivePhoto } from '../components/ActivePhoto
 import EditPhotosPanel, { type EditablePhoto } from '../components/EditPhotosPanel';
 import TemplateManager from '../components/TemplateManager';
 import InlineDraftApproval from '../components/InlineDraftApproval';
-// PipelineReviewModal removed — review now happens at /review/:id
 
 /* ── Simple markdown → HTML for AI description preview ── */
 function mdInline(text: string): string {
@@ -46,7 +50,6 @@ function mdInline(text: string): string {
     .replace(/`(.+?)`/g, '<code>$1</code>');
 }
 function markdownToHtml(md: string): string {
-  // Strip unwanted labels from AI output
   const cleaned = md
     .replace(/^\*\*Title line:\*\*\s*/gm, '')
     .replace(/^Title line:\s*/gm, '')
@@ -143,6 +146,30 @@ interface ProductsOverviewResponse {
   };
 }
 
+/* ──────────────────── Lightbox Component ──────────────────── */
+
+const Lightbox: React.FC<{ src: string; alt: string; onClose: () => void }> = ({ src, alt, onClose }) => (
+  <div
+    onClick={onClose}
+    style={{
+      position: 'fixed',
+      inset: 0,
+      zIndex: 9999,
+      background: 'rgba(0,0,0,0.85)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      cursor: 'zoom-out',
+    }}
+  >
+    <img
+      src={src}
+      alt={alt}
+      style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: '8px', objectFit: 'contain' }}
+    />
+  </div>
+);
+
 /* ──────────────────── ShopifyProductDetail ──────────────────── */
 
 export const ShopifyProductDetail: React.FC = () => {
@@ -156,36 +183,29 @@ export const ShopifyProductDetail: React.FC = () => {
   const [showPhotoControls, setShowPhotoControls] = useState(false);
   const [showEditHtml, setShowEditHtml] = useState(false);
   
-  // New photo management state
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<number[]>([]);
   const [editPanelOpen, setEditPanelOpen] = useState(false);
   const [processingPhotos, setProcessingPhotos] = useState<Set<number>>(new Set());
   
-  // Pipeline Review Modal state
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [pipelineResult, setPipelineResult] = useState<any>(null);
   const [drivePipelineResult, setDrivePipelineResult] = useState<PipelineTriggerResult | null>(null);
 
-  // Drive pipeline trigger
   const drivePipelineMutation = useRunPipeline(id);
-  // Capture result when mutation succeeds
   React.useEffect(() => {
     if (drivePipelineMutation.data) {
       setDrivePipelineResult(drivePipelineMutation.data);
     }
   }, [drivePipelineMutation.data]);
 
-  // TIM Condition data
   const { data: timData, isLoading: timLoading } = useTimCondition(id);
   const tagMutation = useTagProductCondition(id);
 
-  // Product Notes state
   const { data: notesData } = useProductNotes(id);
   const saveNotesMutation = useSaveProductNotes();
   const [localNotes, setLocalNotes] = useState('');
   const [notesInitialized, setNotesInitialized] = useState(false);
 
-  // Sync fetched notes into local state
   React.useEffect(() => {
     if (notesData?.notes !== undefined && !notesInitialized) {
       setLocalNotes(notesData.notes);
@@ -193,7 +213,6 @@ export const ShopifyProductDetail: React.FC = () => {
     }
   }, [notesData, notesInitialized]);
 
-  // Reset when product changes
   React.useEffect(() => {
     setNotesInitialized(false);
   }, [id]);
@@ -218,11 +237,9 @@ export const ShopifyProductDetail: React.FC = () => {
     refetchInterval: 10000,
   });
 
-  // ── Fetch current Shopify images (active photos) ──
   const { data: activePhotosData, isLoading: activePhotosLoading } = useQuery({
     queryKey: ['active-photos', id],
     queryFn: async () => {
-      // Fetch from product info to get current Shopify images
       const productData = await apiClient.get<{ ok: boolean; product?: any }>(`/test/product-info/${id}`);
       const images = productData?.product?.images || [];
       return images.map((img: any) => ({
@@ -238,7 +255,6 @@ export const ShopifyProductDetail: React.FC = () => {
 
   const activePhotos: ActivePhoto[] = activePhotosData ?? [];
 
-  // ── Phase 2: Fetch image gallery data ──
   const { data: imageData, isLoading: imagesLoading } = useQuery({
     queryKey: ['product-images', id],
     queryFn: () =>
@@ -254,7 +270,6 @@ export const ShopifyProductDetail: React.FC = () => {
 
   const galleryImages: GalleryImage[] = imageData?.images ?? [];
 
-  // Transform active photos into editable photos for the edit panel
   const editablePhotos: EditablePhoto[] = activePhotos.map(photo => {
     const galleryMatch = galleryImages.find(img => img.originalUrl === photo.src);
     return {
@@ -296,13 +311,12 @@ export const ShopifyProductDetail: React.FC = () => {
           message: 'Review the results in the Review Queue.',
           autoClose: 4000
         });
-        // Navigate to the draft review page
         try {
           const draftData = await apiClient.get<any>(`/drafts/product/${id}`);
           if (draftData?.draft?.id) {
             navigate(`/review/${draftData.draft.id}`);
           }
-        } catch { /* draft may not exist yet, that's ok */ }
+        } catch { /* draft may not exist yet */ }
       } else {
         addNotification({
           type: 'error',
@@ -337,7 +351,6 @@ export const ShopifyProductDetail: React.FC = () => {
     },
   });
 
-  // ── Phase 2: Reprocess single image ──
   const reprocessMutation = useMutation({
     mutationFn: ({ imageUrl, params }: { imageUrl: string; params: PhotoRoomParams }) =>
       apiClient.post<{ ok: boolean; processedUrl?: string }>(`/products/${id}/images/reprocess`, {
@@ -360,7 +373,6 @@ export const ShopifyProductDetail: React.FC = () => {
     },
   });
 
-  // ── Phase 2: Reprocess all images ──
   const reprocessAllMutation = useMutation({
     mutationFn: (params: PhotoRoomParams) =>
       apiClient.post<{ ok: boolean; succeeded: number; failed: number }>(`/products/${id}/images/reprocess-all`, {
@@ -413,7 +425,6 @@ export const ShopifyProductDetail: React.FC = () => {
     setShowPhotoControls(true);
   }, []);
 
-  // ── Delete mutations ──
   const deleteSingleImageMutation = useMutation({
     mutationFn: (imageId: number) =>
       apiClient.delete(`/products/${id}/images/${imageId}`),
@@ -455,11 +466,9 @@ export const ShopifyProductDetail: React.FC = () => {
     },
   });
 
-  // ── Pipeline Review Modal Mutations ──
   const applyChangesMutation = useMutation({
     mutationFn: async (selections: { description: boolean; photos: boolean; ebayListing: boolean }) => {
       const promises: Promise<any>[] = [];
-
       if (selections.description && pipelineResult?.description) {
         promises.push(
           apiClient.post('/test/update-product', {
@@ -468,12 +477,9 @@ export const ShopifyProductDetail: React.FC = () => {
           })
         );
       }
-
       if (selections.photos && pipelineResult?.images) {
-        // Photo upload logic - for now just log the images
         console.log('Applying processed photos:', pipelineResult.images);
       }
-
       if (selections.ebayListing) {
         promises.push(
           apiClient.post('/ebay/create-draft', {
@@ -484,7 +490,6 @@ export const ShopifyProductDetail: React.FC = () => {
           })
         );
       }
-
       await Promise.all(promises);
     },
     onSuccess: () => {
@@ -505,19 +510,15 @@ export const ShopifyProductDetail: React.FC = () => {
     },
   });
 
-  // Check for existing draft
   const { data: existingDraft } = useQuery({
     queryKey: ['draft', id],
     queryFn: () => apiClient.get(`/drafts/product/${id}`),
   });
 
-  // ── Photo processing functions ──
   const handleProcessSinglePhoto = useCallback(async (photoId: number, params: PhotoRoomParams) => {
     const photo = activePhotos.find(p => p.id === photoId);
     if (!photo) return;
-
     setProcessingPhotos(prev => new Set(prev).add(photoId));
-    
     try {
       await apiClient.post(`/products/${id}/images/reprocess`, {
         imageUrl: photo.src,
@@ -542,14 +543,11 @@ export const ShopifyProductDetail: React.FC = () => {
 
   const handleProcessSelectedPhotos = useCallback(async (photoIds: number[], params: PhotoRoomParams) => {
     setProcessingPhotos(prev => new Set([...prev, ...photoIds]));
-    
     let successCount = 0;
     let errorCount = 0;
-
     for (const photoId of photoIds) {
       const photo = activePhotos.find(p => p.id === photoId);
       if (!photo) continue;
-
       try {
         await apiClient.post(`/products/${id}/images/reprocess`, {
           imageUrl: photo.src,
@@ -560,33 +558,18 @@ export const ShopifyProductDetail: React.FC = () => {
         errorCount++;
       }
     }
-
     setProcessingPhotos(prev => {
       const next = new Set(prev);
       photoIds.forEach(id => next.delete(id));
       return next;
     });
-
     queryClient.invalidateQueries({ queryKey: ['product-images', id] });
-    
     if (successCount > 0 && errorCount === 0) {
-      addNotification({ 
-        type: 'success', 
-        title: `Processed ${successCount} photo${successCount !== 1 ? 's' : ''}`, 
-        autoClose: 3000 
-      });
+      addNotification({ type: 'success', title: `Processed ${successCount} photo${successCount !== 1 ? 's' : ''}`, autoClose: 3000 });
     } else if (successCount > 0) {
-      addNotification({ 
-        type: 'warning', 
-        title: `Processed ${successCount}, ${errorCount} failed`, 
-        autoClose: 4000 
-      });
+      addNotification({ type: 'warning', title: `Processed ${successCount}, ${errorCount} failed`, autoClose: 4000 });
     } else {
-      addNotification({ 
-        type: 'error', 
-        title: `Failed to process ${errorCount} photo${errorCount !== 1 ? 's' : ''}`, 
-        autoClose: 4000 
-      });
+      addNotification({ type: 'error', title: `Failed to process ${errorCount} photo${errorCount !== 1 ? 's' : ''}`, autoClose: 4000 });
     }
   }, [activePhotos, id, queryClient, addNotification]);
 
@@ -604,7 +587,6 @@ export const ShopifyProductDetail: React.FC = () => {
     }
   }, [reprocessAllMutation, addNotification]);
 
-  // ── Edit panel handlers ──
   const handleEditPhotos = useCallback((photoIds: number[]) => {
     setSelectedPhotoIds(photoIds);
     setEditPanelOpen(true);
@@ -618,7 +600,6 @@ export const ShopifyProductDetail: React.FC = () => {
     deleteBulkImagesMutation.mutate(imageIds);
   }, [deleteBulkImagesMutation]);
 
-  // ── Pipeline Step Display Names ──
   const getStepDisplayName = useCallback((step: string): string => {
     const stepMap: Record<string, string> = {
       fetch_product: 'Fetch Product',
@@ -629,663 +610,736 @@ export const ShopifyProductDetail: React.FC = () => {
     return stepMap[step] || step.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
   }, []);
 
-  // ── Pipeline Review Modal Handlers ──
-  const handleSaveDraft = useCallback(() => {
-    addNotification({
-      type: 'info',
-      title: 'Draft saved for later review',
-      autoClose: 4000
-    });
-  }, [addNotification]);
+  // ── Derived state for status badges ──
+  const timConditionLabel = timData?.match?.condition
+    ? timData.match.condition.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())
+    : null;
+
+  const ebayStatusLabel = listing?.ebayListingId
+    ? listing.ebayListingId.startsWith('draft-') ? 'eBay Draft' : 'Listed on eBay'
+    : null;
 
   return (
-    <div>
+    <>
       <style>
         {`
           @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
           }
+          @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+          .product-detail-animate > * {
+            animation: fadeIn 0.2s ease-out both;
+          }
+          .product-detail-animate > *:nth-child(2) { animation-delay: 0.05s; }
+          .product-detail-animate > *:nth-child(3) { animation-delay: 0.1s; }
+          .product-detail-animate > *:nth-child(4) { animation-delay: 0.15s; }
           
-          .product-detail-page {
-            --polaris-color-bg-surface: #ffffff;
-            --polaris-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.1);
+          .pipeline-step {
+            transition: all 0.15s ease;
+          }
+          .pipeline-step:hover {
+            background: #f9fafb;
+            border-radius: 8px;
           }
           
-          .premium-card {
-            background: var(--polaris-color-bg-surface);
-            box-shadow: var(--polaris-shadow-card);
+          .empty-photos-zone {
+            border: 2px dashed #d1d5db;
             border-radius: 12px;
-            border: 1px solid #e5e7eb;
+            padding: 48px 24px;
+            text-align: center;
+            background: linear-gradient(180deg, #fafbfc 0%, #f3f4f6 100%);
+            transition: border-color 0.2s, background 0.2s;
+          }
+          .empty-photos-zone:hover {
+            border-color: #9ca3af;
+            background: linear-gradient(180deg, #f8f9fb 0%, #eef0f3 100%);
+          }
+
+          .description-rendered {
+            font-size: 14px;
+            line-height: 1.7;
+            color: #1a1a1a;
+          }
+          .description-rendered h1,
+          .description-rendered h2,
+          .description-rendered h3 {
+            margin-top: 1em;
+            margin-bottom: 0.4em;
+            font-weight: 600;
+            color: #111;
+          }
+          .description-rendered ul {
+            padding-left: 1.5em;
+            margin: 0.5em 0;
+          }
+          .description-rendered li {
+            margin-bottom: 0.2em;
+          }
+          .description-rendered p {
+            margin: 0.4em 0;
           }
         `}
       </style>
-    <Page
-      title={product?.title ?? 'Loading product…'}
-      subtitle={id ? `Shopify ID ${id}` : undefined}
-      backAction={{ content: 'Products', onAction: () => navigate('/listings') }}
-      primaryAction={{
-        content: '🚀 Run Pipeline',
-        onAction: () => runPipelineMutation.mutate(),
-        loading: runPipelineMutation.isPending,
-      }}
-      secondaryActions={
-        product
-          ? [
-              {
-                content: 'View in Shopify',
-                icon: ExternalSmallIcon,
-                url: `https://admin.shopify.com/store/usedcameragear/products/${id}`,
-                external: true,
-              },
-            ]
-          : undefined
-      }
-    >
-      {productLoading && (
-        <div style={{ padding: '2rem', textAlign: 'center' }}>
-          <Spinner accessibilityLabel="Loading product" size="large" />
-        </div>
-      )}
 
-      {product && (
-        <>
-          {/* ── Draft Ready Banner ── */}
-          {existingDraft && (existingDraft as any)?.draft?.id && (
-            <Banner
-              title="Draft ready for review"
-              tone="info"
-              action={{
-                content: 'Review Now',
-                onAction: () => navigate(`/review/${(existingDraft as any).draft.id}`),
-              }}
-            >
-              <p>Pipeline has completed for this product. Review and apply the changes.</p>
-            </Banner>
-          )}
+      <Page
+        title={product?.title ?? 'Loading product…'}
+        subtitle={product ? `${variant?.sku || 'No SKU'} · ${formatMoney(variant?.price)}` : undefined}
+        titleMetadata={
+          product ? (
+            <InlineStack gap="200">
+              {statusBadge}
+              {timConditionLabel && (
+                <Badge tone="info">{timConditionLabel}</Badge>
+              )}
+              {ebayStatusLabel && (
+                <Badge tone={ebayStatusLabel === 'Listed on eBay' ? 'success' : 'attention'}>
+                  {ebayStatusLabel}
+                </Badge>
+              )}
+            </InlineStack>
+          ) : undefined
+        }
+        backAction={{ content: 'Products', onAction: () => navigate('/listings') }}
+        primaryAction={{
+          content: '🚀 Run Pipeline',
+          onAction: () => runPipelineMutation.mutate(),
+          loading: runPipelineMutation.isPending,
+        }}
+        secondaryActions={
+          product
+            ? [
+                {
+                  content: 'Shopify Admin',
+                  icon: ExternalSmallIcon,
+                  url: `https://admin.shopify.com/store/usedcameragear/products/${id}`,
+                  external: true,
+                },
+                ...(product?.handle ? [{
+                  content: 'Live Page',
+                  icon: ExternalSmallIcon,
+                  url: `https://usedcameragear.myshopify.com/products/${product.handle}`,
+                  external: true,
+                }] : []),
+                ...(listing?.ebayListingId && !listing.ebayListingId.startsWith('draft-') ? [{
+                  content: 'View on eBay',
+                  icon: ExternalSmallIcon,
+                  url: `https://www.ebay.com/itm/${listing.ebayListingId}`,
+                  external: true,
+                }] : []),
+              ]
+            : undefined
+        }
+      >
+        {productLoading && (
+          <div style={{ padding: '4rem', textAlign: 'center' }}>
+            <Spinner accessibilityLabel="Loading product" size="large" />
+          </div>
+        )}
 
-          {/* ── Inline Draft Approval Banner ── */}
-          <InlineDraftApproval productId={id!} />
-
-          <Layout>
-            {/* ── LEFT COLUMN (2/3) ── */}
-            <Layout.Section>
-              <BlockStack gap="500">
-              {/* ── Active Photos Gallery ── */}
-              <Card>
-                <BlockStack gap="400">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <InlineStack gap="300" blockAlign="center">
-                      <Text variant="headingMd" as="h2">Product Photos</Text>
-                      {activePhotos.length > 0 && (
-                        <Badge tone="info">{`${activePhotos.length} photo${activePhotos.length !== 1 ? 's' : ''}`}</Badge>
-                      )}
-                    </InlineStack>
-                    {activePhotos.length > 0 && (
-                      <Button
-                        variant="secondary"
-                        size="slim"
-                        onClick={() => setEditPanelOpen(prev => !prev)}
-                      >
-                        {editPanelOpen ? 'Hide' : 'Show'} Photo Editor
-                      </Button>
-                    )}
-                  </InlineStack>
-                  
-                  <ActivePhotosGallery
-                    photos={activePhotos}
-                    loading={activePhotosLoading}
-                    onDeleteSingle={handleDeleteSingle}
-                    onDeleteBulk={handleDeleteBulk}
-                    onEditPhotos={handleEditPhotos}
-                    onSelectionChange={setSelectedPhotoIds}
-                  />
-                </BlockStack>
-              </Card>
-
-            {/* ── Edit Photos Panel ── */}
-            <EditPhotosPanel
-              photos={editablePhotos}
-              selectedPhotoIds={selectedPhotoIds}
-              isOpen={editPanelOpen}
-              onToggle={() => setEditPanelOpen(prev => !prev)}
-              onProcessSingle={handleProcessSinglePhoto}
-              onProcessSelected={handleProcessSelectedPhotos}
-              onProcessAll={handleProcessAllPhotos}
-              processing={reprocessAllMutation.isPending || processingPhotos.size > 0}
-            />
-
-            {/* ── Legacy Photo Gallery (for comparison/debugging) ── */}
-            {process.env.NODE_ENV === 'development' && (
-              <Card>
-                <BlockStack gap="400">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text variant="headingMd" as="h2">Legacy Gallery (Dev Only)</Text>
-                    <InlineStack gap="200" blockAlign="center">
-                      {galleryImages.length > 0 && (
-                        <Badge tone="info">{`${galleryImages.length} images`}</Badge>
-                      )}
-                      <Button
-                        onClick={() => handleReprocessAll({ background: '#ffffff', padding: 0.1, shadow: false })}
-                        loading={reprocessAllMutation.isPending}
-                      >
-                        Reprocess All
-                      </Button>
-                    </InlineStack>
-                  </InlineStack>
-
-                  {imagesLoading ? (
-                    <div style={{ padding: '2rem', textAlign: 'center' }}>
-                      <Spinner accessibilityLabel="Loading images" />
-                    </div>
-                  ) : galleryImages.length === 0 ? (
-                    <div style={{ padding: '2rem', textAlign: 'center' }}>
-                      <Text tone="subdued" as="p">No images found for this product</Text>
-                    </div>
-                  ) : (
-                    <PhotoGallery
-                      images={galleryImages}
-                      loading={imagesLoading}
-                      viewMode={galleryViewMode}
-                      onViewModeChange={setGalleryViewMode}
-                      onSelectImage={handleSelectImage}
-                      selectedImageUrl={selectedImageUrl}
-                      onEditImage={handleImageEditClick}
-                    />
-                  )}
-                </BlockStack>
-              </Card>
+        {product && (
+          <div className="product-detail-animate">
+            {/* ── Draft Ready Banner ── */}
+            {existingDraft && (existingDraft as any)?.draft?.id && (
+              <div style={{ marginBottom: '16px' }}>
+                <Banner
+                  title="Draft ready for review"
+                  tone="info"
+                  action={{
+                    content: 'Review Now',
+                    onAction: () => navigate(`/review/${(existingDraft as any).draft.id}`),
+                  }}
+                >
+                  <p>Pipeline has completed for this product. Review and apply the changes.</p>
+                </Banner>
+              </div>
             )}
 
-              {/* ── AI Description Approval Banner ── */}
-              {aiDescription && (
-                <Card>
-                  <Banner
-                    tone="success"
-                    title="✨ AI Description Ready"
-                    action={{
-                      content: "Use This Description",
-                      onAction: async () => {
-                        try {
-                          const htmlContent = markdownToHtml(aiDescription);
-                          await apiClient.post(`/api/test/update-product`, {
-                            productId: id,
-                            body_html: htmlContent
-                          });
-                          addNotification({ 
-                            type: 'success', 
-                            title: 'Description updated', 
-                            message: 'AI description has been applied to your product',
-                            autoClose: 4000 
-                          });
-                          queryClient.invalidateQueries({ queryKey: ['product-info', id] });
-                        } catch (error) {
-                          addNotification({
-                            type: 'error',
-                            title: 'Update failed',
-                            message: error instanceof Error ? error.message : 'Failed to update product description',
-                          });
-                        }
-                      }
-                    }}
-                    secondaryAction={{
-                      content: "Dismiss",
-                      onAction: () => {
-                        queryClient.setQueryData(['product-pipeline-status', id], (old: any) => ({
-                          ...old,
-                          status: { ...old?.status, ai_description: null }
-                        }));
-                      }
-                    }}
-                  >
-                    <BlockStack gap="200">
-                      <Text as="p">A new AI-generated description is ready to apply to your product.</Text>
-                      <div
-                        style={{ 
-                          maxHeight: '150px', 
-                          overflow: 'auto', 
-                          padding: '12px', 
-                          background: '#f8f9fa', 
-                          borderRadius: '8px',
-                          border: '1px solid #e1e3e5',
-                          fontSize: '14px'
-                        }}
-                        dangerouslySetInnerHTML={{ __html: markdownToHtml(aiDescription.slice(0, 200) + '...') }}
-                      />
+            <InlineDraftApproval productId={id!} />
+
+            {/* ── Drive Pipeline Result Banner ── */}
+            {drivePipelineResult && (
+              <div style={{ marginBottom: '16px' }}>
+                <Banner
+                  title={drivePipelineResult.success ? 'Drive Pipeline Complete' : 'Drive Pipeline Issue'}
+                  tone={drivePipelineResult.success ? 'success' : 'warning'}
+                  onDismiss={() => setDrivePipelineResult(null)}
+                >
+                  {drivePipelineResult.success ? (
+                    <BlockStack gap="100">
+                      <Text as="p" variant="bodySm">Found {drivePipelineResult.photos?.count} photos in {drivePipelineResult.photos?.presetName}/{drivePipelineResult.photos?.folderName}</Text>
+                      {drivePipelineResult.description?.generated && <Text as="p" variant="bodySm">✅ AI description generated</Text>}
+                      {drivePipelineResult.condition?.tagApplied && <Text as="p" variant="bodySm">✅ {drivePipelineResult.condition.tag}</Text>}
                     </BlockStack>
-                  </Banner>
-                </Card>
-              )}
+                  ) : (
+                    <Text as="p" variant="bodySm">{drivePipelineResult.error}</Text>
+                  )}
+                </Banner>
+              </div>
+            )}
 
-              {/* ── Photos Processed Approval Banner ── */}
-              {(() => {
-                const processedPhotos = galleryImages.filter(img => img.processedUrl);
-                return processedPhotos.length > 0 && (
-                  <Card>
-                    <Banner
-                      tone="info"
-                      title={`📸 ${processedPhotos.length} Photos Processed`}
-                      action={{
-                        content: "Apply All to Shopify",
-                        onAction: async () => {
-                          try {
-                            // This would need an actual API endpoint to apply processed images
-                            addNotification({ 
-                              type: 'success', 
-                              title: 'Photos applied', 
-                              message: `${processedPhotos.length} processed photos applied to Shopify`,
-                              autoClose: 4000 
-                            });
-                          } catch (error) {
-                            addNotification({
-                              type: 'error',
-                              title: 'Apply failed',
-                              message: error instanceof Error ? error.message : 'Failed to apply processed photos',
-                            });
-                          }
-                        }
-                      }}
-                      secondaryAction={{
-                        content: "Dismiss",
-                        onAction: () => {
-                          // Could implement a way to mark these as dismissed
-                        }
-                      }}
-                    >
-                      <Text as="p">Background removal and enhancement complete. Ready to apply to your Shopify product?</Text>
-                    </Banner>
-                  </Card>
-                );
-              })()}
-
-              {/* ── Product Notes ── */}
-              <Card>
+            <Layout>
+              {/* ── LEFT COLUMN ── */}
+              <Layout.Section>
                 <BlockStack gap="400">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <InlineStack gap="200" blockAlign="center">
-                      <Text variant="headingMd" as="h2">Product Notes</Text>
-                      {localNotes.trim() && <Badge tone="attention">Has Notes</Badge>}
-                    </InlineStack>
-                    <Button
-                      variant="primary"
-                      size="slim"
-                      onClick={() => {
-                        if (id) saveNotesMutation.mutate({ productId: id, notes: localNotes });
-                      }}
-                      loading={saveNotesMutation.isPending}
-                      disabled={!id || localNotes === (notesData?.notes ?? '')}
-                    >
-                      Save Notes
-                    </Button>
-                  </InlineStack>
-                  <TextField
-                    label=""
-                    labelHidden
-                    value={localNotes}
-                    onChange={setLocalNotes}
-                    multiline={4}
-                    placeholder="Add condition notes, blemishes, missing accessories, etc. These will be injected into AI-generated descriptions."
-                    autoComplete="off"
-                    onBlur={() => {
-                      if (id && localNotes !== (notesData?.notes ?? '')) {
-                        saveNotesMutation.mutate({ productId: id, notes: localNotes });
-                      }
-                    }}
-                  />
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    💡 Notes are automatically included when generating AI descriptions.
-                  </Text>
-                </BlockStack>
-              </Card>
 
-              {/* ── Description Section ── */}
-              <Card>
-                <BlockStack gap="500">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text variant="headingMd" as="h2">Description</Text>
-                    <Button
-                      icon={<Play className="w-4 h-4" />}
-                      onClick={() => aiMutation.mutate()}
-                      loading={aiMutation.isPending}
-                      variant="secondary"
-                    >
-                      Regenerate with AI
-                    </Button>
-                  </InlineStack>
-
-                  {aiDescription ? (
+                  {/* ── Photos ── */}
+                  <Card>
                     <BlockStack gap="400">
-                      <div
-                        style={{
-                          padding: '16px',
-                          background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
-                          borderRadius: '12px',
-                          border: '2px solid #0ea5e9',
-                          boxShadow: '0 4px 6px -1px rgba(14, 165, 233, 0.1)'
-                        }}
-                      >
+                      <InlineStack align="space-between" blockAlign="center">
+                        <InlineStack gap="300" blockAlign="center">
+                          <Text variant="headingMd" as="h2">Photos</Text>
+                          {activePhotos.length > 0 && (
+                            <Badge>{`${activePhotos.length} photo${activePhotos.length !== 1 ? 's' : ''}`}</Badge>
+                          )}
+                        </InlineStack>
+                        {activePhotos.length > 0 && (
+                          <Button
+                            size="slim"
+                            onClick={() => setEditPanelOpen(prev => !prev)}
+                          >
+                            {editPanelOpen ? 'Close Editor' : 'Edit Photos'}
+                          </Button>
+                        )}
+                      </InlineStack>
+                      
+                      {activePhotos.length === 0 && !activePhotosLoading ? (
+                        <div className="empty-photos-zone">
+                          <BlockStack gap="300" align="center">
+                            <div style={{ fontSize: '36px', opacity: 0.4 }}>📷</div>
+                            <Text variant="headingSm" as="h3" tone="subdued">No photos yet</Text>
+                            <Text variant="bodySm" as="p" tone="subdued">
+                              Run the pipeline to search Google Drive for photos, or upload them in Shopify Admin.
+                            </Text>
+                            <div style={{ marginTop: '8px' }}>
+                              <Button
+                                size="slim"
+                                onClick={() => drivePipelineMutation.mutate()}
+                                loading={drivePipelineMutation.isPending}
+                              >
+                                📸 Search Drive for Photos
+                              </Button>
+                            </div>
+                          </BlockStack>
+                        </div>
+                      ) : (
+                        <ActivePhotosGallery
+                          photos={activePhotos}
+                          loading={activePhotosLoading}
+                          onDeleteSingle={handleDeleteSingle}
+                          onDeleteBulk={handleDeleteBulk}
+                          onEditPhotos={handleEditPhotos}
+                          onSelectionChange={setSelectedPhotoIds}
+                        />
+                      )}
+                    </BlockStack>
+                  </Card>
+
+                  {/* ── Edit Photos Panel ── */}
+                  <EditPhotosPanel
+                    photos={editablePhotos}
+                    selectedPhotoIds={selectedPhotoIds}
+                    isOpen={editPanelOpen}
+                    onToggle={() => setEditPanelOpen(prev => !prev)}
+                    onProcessSingle={handleProcessSinglePhoto}
+                    onProcessSelected={handleProcessSelectedPhotos}
+                    onProcessAll={handleProcessAllPhotos}
+                    processing={reprocessAllMutation.isPending || processingPhotos.size > 0}
+                  />
+
+                  {/* ── AI Description (if ready) ── */}
+                  {aiDescription && (
+                    <Card>
+                      <div style={{
+                        padding: '16px',
+                        background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
+                        borderRadius: '12px',
+                        border: '2px solid #0ea5e9',
+                        margin: '-16px',
+                      }}>
                         <BlockStack gap="300">
                           <InlineStack align="space-between" blockAlign="center">
                             <InlineStack gap="200" blockAlign="center">
                               <Text variant="headingSm" as="h3">🤖 AI Generated Description</Text>
-                              <Badge tone="info">Draft</Badge>
+                              <Badge tone="info">Ready to Apply</Badge>
                             </InlineStack>
-                            <Button
-                              variant="primary"
-                              size="slim"
-                              onClick={async () => {
-                                try {
-                                  const htmlContent = markdownToHtml(aiDescription);
-                                  await apiClient.post(`/api/test/update-product`, {
-                                    productId: id,
-                                    body_html: htmlContent
-                                  });
-                                  addNotification({ 
-                                    type: 'success', 
-                                    title: 'Description updated', 
-                                    message: 'AI description has been applied to your product',
-                                    autoClose: 4000 
-                                  });
-                                  queryClient.invalidateQueries({ queryKey: ['product-info', id] });
-                                } catch (error) {
-                                  addNotification({
-                                    type: 'error',
-                                    title: 'Update failed',
-                                    message: error instanceof Error ? error.message : 'Failed to update product description',
-                                  });
-                                }
-                              }}
-                            >
-                              Use This Description
-                            </Button>
+                            <InlineStack gap="200">
+                              <Button
+                                variant="primary"
+                                size="slim"
+                                onClick={async () => {
+                                  try {
+                                    const htmlContent = markdownToHtml(aiDescription);
+                                    await apiClient.post(`/api/test/update-product`, {
+                                      productId: id,
+                                      body_html: htmlContent
+                                    });
+                                    addNotification({ 
+                                      type: 'success', 
+                                      title: 'Description updated', 
+                                      message: 'AI description has been applied to your product',
+                                      autoClose: 4000 
+                                    });
+                                    queryClient.invalidateQueries({ queryKey: ['product-info', id] });
+                                  } catch (error) {
+                                    addNotification({
+                                      type: 'error',
+                                      title: 'Update failed',
+                                      message: error instanceof Error ? error.message : 'Failed to update product description',
+                                    });
+                                  }
+                                }}
+                              >
+                                Apply Description
+                              </Button>
+                              <Button
+                                size="slim"
+                                onClick={() => {
+                                  queryClient.setQueryData(['product-pipeline-status', id], (old: any) => ({
+                                    ...old,
+                                    status: { ...old?.status, ai_description: null }
+                                  }));
+                                }}
+                              >
+                                Dismiss
+                              </Button>
+                            </InlineStack>
                           </InlineStack>
                           <div
+                            className="description-rendered"
                             style={{ 
                               maxHeight: '300px', 
                               overflow: 'auto', 
                               padding: '16px', 
                               background: '#ffffff', 
                               borderRadius: '8px',
-                              border: '1px solid #e5e7eb',
-                              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
+                              border: '1px solid #bae6fd',
                             }}
                             dangerouslySetInnerHTML={{ __html: markdownToHtml(aiDescription) }}
                           />
                         </BlockStack>
                       </div>
-                    </BlockStack>
-                  ) : null}
-
-                  {/* Current Description */}
-                  <Divider />
-                  {product.body_html ? (
-                    <BlockStack gap="400">
-                      <Text variant="headingSm" as="h3">Current Description</Text>
-                      <div
-                        style={{ 
-                          maxHeight: '300px', 
-                          overflow: 'auto', 
-                          padding: '20px', 
-                          background: '#ffffff', 
-                          borderRadius: '12px',
-                          border: '1px solid #e5e7eb',
-                          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
-                          fontSize: '14px',
-                          lineHeight: '1.6'
-                        }}
-                        dangerouslySetInnerHTML={{ __html: product.body_html }}
-                      />
-                      
-                      <details>
-                        <summary
-                          style={{
-                            padding: '8px 12px',
-                            background: '#f8f9fa',
-                            borderRadius: '6px',
-                            border: '1px solid #e5e7eb',
-                            cursor: 'pointer',
-                            fontFamily: 'SF Mono, Monaco, monospace',
-                            fontSize: '13px',
-                            userSelect: 'none'
-                          }}
-                        >
-                          📝 View HTML Source
-                        </summary>
-                        <div
-                          style={{ 
-                            marginTop: '8px',
-                            maxHeight: '200px', 
-                            overflow: 'auto', 
-                            padding: '16px', 
-                            background: '#1e1e1e', 
-                            color: '#ffffff',
-                            borderRadius: '8px',
-                            border: '1px solid #374151',
-                            fontFamily: 'SF Mono, Monaco, Consolas, monospace',
-                            fontSize: '12px',
-                            lineHeight: '1.5'
-                          }}
-                        >
-                          <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{product.body_html}</pre>
-                        </div>
-                      </details>
-                    </BlockStack>
-                  ) : (
-                    <BlockStack gap="300" align="center">
-                      <div style={{ textAlign: 'center', padding: '40px 20px' }}>
-                        <Text variant="headingSm" as="h3" tone="subdued">No description yet</Text>
-                        <Text tone="subdued" as="p">Use AI to generate a compelling product description</Text>
-                      </div>
-                    </BlockStack>
+                    </Card>
                   )}
-                </BlockStack>
-              </Card>
-              </BlockStack>
-            </Layout.Section>
 
-            {/* ── RIGHT SIDEBAR (1/3) ── */}
-            <Layout.Section variant="oneThird">
-              <BlockStack gap="500">
-                
-                {/* ── Product Status & Details ── */}
-                <Card>
-                  <BlockStack gap="400">
-                    <InlineStack align="space-between" blockAlign="center">
-                      <Text variant="headingMd" as="h2">Product Details</Text>
-                      {statusBadge}
-                    </InlineStack>
-                    <Divider />
-                    <BlockStack gap="300">
-                      <InlineStack align="space-between">
-                        <Text variant="bodyMd" tone="subdued" as="span">Price</Text>
-                        <Text variant="bodyMd" fontWeight="medium" as="span">{formatMoney(variant?.price ?? null)}</Text>
+                  {/* ── Description ── */}
+                  <Card>
+                    <BlockStack gap="400">
+                      <InlineStack align="space-between" blockAlign="center">
+                        <Text variant="headingMd" as="h2">Description</Text>
+                        <Button
+                          icon={EditIcon}
+                          onClick={() => aiMutation.mutate()}
+                          loading={aiMutation.isPending}
+                          size="slim"
+                        >
+                          Regenerate with AI
+                        </Button>
                       </InlineStack>
-                      <InlineStack align="space-between">
-                        <Text variant="bodyMd" tone="subdued" as="span">Compare-at price</Text>
-                        <Text variant="bodyMd" as="span">{formatMoney(variant?.compare_at_price ?? null)}</Text>
-                      </InlineStack>
-                      <InlineStack align="space-between">
-                        <Text variant="bodyMd" tone="subdued" as="span">SKU</Text>
-                        <span style={{ fontFamily: 'SF Mono, monospace' }}>
-                          <Text variant="bodyMd" as="span">{variant?.sku ?? '—'}</Text>
-                        </span>
-                      </InlineStack>
-                      <InlineStack align="space-between">
-                        <Text variant="bodyMd" tone="subdued" as="span">Barcode</Text>
-                        <span style={{ fontFamily: 'SF Mono, monospace' }}>
-                          <Text variant="bodyMd" as="span">{variant?.barcode ?? '—'}</Text>
-                        </span>
-                      </InlineStack>
-                      <InlineStack align="space-between">
-                        <Text variant="bodyMd" tone="subdued" as="span">Inventory</Text>
-                        <Text variant="bodyMd" fontWeight="medium" as="span">{variant?.inventory_quantity ?? '—'}</Text>
-                      </InlineStack>
+
+                      {product.body_html ? (
+                        <>
+                          <div
+                            className="description-rendered"
+                            style={{ 
+                              maxHeight: '400px', 
+                              overflow: 'auto', 
+                              padding: '20px', 
+                              background: '#f9fafb', 
+                              borderRadius: '8px',
+                              border: '1px solid #e3e5e7',
+                            }}
+                            dangerouslySetInnerHTML={{ __html: product.body_html }}
+                          />
+                          <details>
+                            <summary
+                              style={{
+                                padding: '8px 12px',
+                                background: '#f8f9fa',
+                                borderRadius: '6px',
+                                border: '1px solid #e5e7eb',
+                                cursor: 'pointer',
+                                fontFamily: 'SF Mono, Monaco, monospace',
+                                fontSize: '13px',
+                                userSelect: 'none',
+                                color: '#6b7280',
+                              }}
+                            >
+                              View HTML source
+                            </summary>
+                            <div
+                              style={{ 
+                                marginTop: '8px',
+                                maxHeight: '200px', 
+                                overflow: 'auto', 
+                                padding: '16px', 
+                                background: '#1e1e1e', 
+                                color: '#d4d4d4',
+                                borderRadius: '8px',
+                                fontFamily: 'SF Mono, Monaco, Consolas, monospace',
+                                fontSize: '12px',
+                                lineHeight: '1.5'
+                              }}
+                            >
+                              <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{product.body_html}</pre>
+                            </div>
+                          </details>
+                        </>
+                      ) : (
+                        <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+                          <div style={{ fontSize: '32px', opacity: 0.3, marginBottom: '12px' }}>📝</div>
+                          <Text variant="headingSm" as="h3" tone="subdued">No description yet</Text>
+                          <Text variant="bodySm" tone="subdued" as="p">
+                            Run the pipeline or click "Regenerate with AI" to create a description.
+                          </Text>
+                        </div>
+                      )}
                     </BlockStack>
-                    <Divider />
+                  </Card>
+
+                  {/* ── Product Notes ── */}
+                  <Card>
                     <BlockStack gap="300">
-                      <InlineStack align="space-between">
-                        <Text variant="bodyMd" tone="subdued" as="span">Vendor</Text>
-                        <Text variant="bodyMd" as="span">{product.vendor ?? '—'}</Text>
+                      <InlineStack align="space-between" blockAlign="center">
+                        <InlineStack gap="200" blockAlign="center">
+                          <Text variant="headingMd" as="h2">Notes</Text>
+                          {localNotes.trim() && <Badge tone="attention">Has Notes</Badge>}
+                        </InlineStack>
+                        <Button
+                          variant="primary"
+                          size="slim"
+                          onClick={() => {
+                            if (id) saveNotesMutation.mutate({ productId: id, notes: localNotes });
+                          }}
+                          loading={saveNotesMutation.isPending}
+                          disabled={!id || localNotes === (notesData?.notes ?? '')}
+                        >
+                          Save
+                        </Button>
                       </InlineStack>
-                      <InlineStack align="space-between">
-                        <Text variant="bodyMd" tone="subdued" as="span">Product type</Text>
-                        <Text variant="bodyMd" as="span">{product.product_type ?? '—'}</Text>
+                      <TextField
+                        label=""
+                        labelHidden
+                        value={localNotes}
+                        onChange={setLocalNotes}
+                        multiline={3}
+                        placeholder="Condition notes, blemishes, missing accessories… Included in AI descriptions."
+                        autoComplete="off"
+                        onBlur={() => {
+                          if (id && localNotes !== (notesData?.notes ?? '')) {
+                            saveNotesMutation.mutate({ productId: id, notes: localNotes });
+                          }
+                        }}
+                      />
+                    </BlockStack>
+                  </Card>
+
+                  {/* ── Templates (collapsible) ── */}
+                  <TemplateManager
+                    productId={id}
+                    onApplied={() => {
+                      queryClient.invalidateQueries({ queryKey: ['product-images', id] });
+                    }}
+                  />
+                </BlockStack>
+              </Layout.Section>
+
+              {/* ── RIGHT SIDEBAR ── */}
+              <Layout.Section variant="oneThird">
+                <BlockStack gap="400">
+
+                  {/* ── Pipeline Status (prominent progress tracker) ── */}
+                  <Card>
+                    <BlockStack gap="400">
+                      <InlineStack align="space-between" blockAlign="center">
+                        <Text variant="headingMd" as="h2">Pipeline</Text>
+                        {pipelineJob?.status && (
+                          <Badge 
+                            tone={
+                              pipelineJob.status === 'completed' ? 'success' :
+                              pipelineJob.status === 'failed' ? 'critical' :
+                              pipelineJob.status === 'running' ? 'attention' : 'info'
+                            }
+                          >
+                            {pipelineJob.status}
+                          </Badge>
+                        )}
                       </InlineStack>
-                      {product.tags && (
-                        <BlockStack gap="200">
-                          <Text variant="bodyMd" tone="subdued" as="span">Tags</Text>
-                          <InlineStack gap="100" wrap>
-                            {(typeof product.tags === 'string' ? product.tags.split(',') : product.tags).map((tag: string) => (
-                              <Badge key={tag.trim()}>{tag.trim()}</Badge>
-                            ))}
-                          </InlineStack>
+
+                      {pipelineSteps.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                          <div style={{ fontSize: '28px', opacity: 0.3, marginBottom: '8px' }}>⚡</div>
+                          <Text variant="bodySm" tone="subdued" as="p">No pipeline runs yet</Text>
+                        </div>
+                      ) : (
+                        <BlockStack gap="0">
+                          {pipelineSteps.map((step: any, index: number) => {
+                            const isLast = index === pipelineSteps.length - 1;
+                            const isDone = step.status === 'done';
+                            const isError = step.status === 'error';
+                            const isRunning = step.status === 'running';
+                            
+                            return (
+                              <div key={step.name} className="pipeline-step" style={{ padding: '2px 4px' }}>
+                                <InlineStack gap="300" blockAlign="start">
+                                  <div style={{ position: 'relative', marginTop: '2px' }}>
+                                    <div
+                                      style={{
+                                        width: '16px',
+                                        height: '16px',
+                                        borderRadius: '50%',
+                                        border: `2px solid ${
+                                          isDone ? '#22c55e' :
+                                          isError ? '#ef4444' :
+                                          isRunning ? '#f59e0b' : '#d1d5db'
+                                        }`,
+                                        backgroundColor: isDone ? '#22c55e' : '#ffffff',
+                                        position: 'relative',
+                                        zIndex: 1
+                                      }}
+                                    >
+                                      {isDone && (
+                                        <svg viewBox="0 0 12 12" style={{ position: 'absolute', inset: '1px', fill: '#fff' }}>
+                                          <path d="M10 3L4.5 8.5 2 6" stroke="#fff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                                        </svg>
+                                      )}
+                                      {isRunning && (
+                                        <div
+                                          style={{
+                                            position: 'absolute',
+                                            inset: '2px',
+                                            borderRadius: '50%',
+                                            backgroundColor: '#f59e0b',
+                                            animation: 'pulse 2s infinite'
+                                          }}
+                                        />
+                                      )}
+                                    </div>
+                                    {!isLast && (
+                                      <div
+                                        style={{
+                                          position: 'absolute',
+                                          top: '18px',
+                                          left: '50%',
+                                          transform: 'translateX(-50%)',
+                                          width: '2px',
+                                          height: '20px',
+                                          backgroundColor: isDone ? '#22c55e' : '#e5e7eb'
+                                        }}
+                                      />
+                                    )}
+                                  </div>
+                                  
+                                  <div style={{ flex: 1, paddingBottom: isLast ? '0' : '12px' }}>
+                                    <InlineStack align="space-between" blockAlign="center">
+                                      <Text 
+                                        as="span" 
+                                        variant="bodySm" 
+                                        fontWeight={isDone ? 'medium' : 'regular'}
+                                        tone={isError ? 'critical' : undefined}
+                                      >
+                                        {getStepDisplayName(step.name)}
+                                      </Text>
+                                      <Text 
+                                        as="span" 
+                                        variant="bodySm" 
+                                        tone={isDone ? 'success' : isError ? 'critical' : 'subdued'}
+                                      >
+                                        {isDone ? '✓' : isError ? '✗' : isRunning ? '⋯' : '○'}
+                                      </Text>
+                                    </InlineStack>
+                                    {step.error && (
+                                      <Text variant="bodySm" tone="critical" as="p">{step.error}</Text>
+                                    )}
+                                  </div>
+                                </InlineStack>
+                              </div>
+                            );
+                          })}
                         </BlockStack>
                       )}
-                    </BlockStack>
-                  </BlockStack>
-                </Card>
 
-                {/* ── TIM Condition ── */}
-                <Card>
-                  <BlockStack gap="400">
-                    <InlineStack align="space-between" blockAlign="center">
-                      <Text variant="headingMd" as="h2">TIM Condition</Text>
-                      {timData?.match?.condition && (
-                        <Badge tone={
-                          timData.match.condition === 'like_new_minus' || timData.match.condition === 'excellent_plus' ? 'success' :
-                          timData.match.condition === 'excellent' ? 'success' :
-                          timData.match.condition === 'poor' || timData.match.condition === 'ugly' ? 'warning' : 'info'
-                        }>
-                          {timData.match.condition.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
-                        </Badge>
-                      )}
-                    </InlineStack>
-                    <Divider />
-                    {timLoading ? (
-                      <Spinner size="small" />
-                    ) : timData?.match ? (
-                      <BlockStack gap="300">
-                        {timData.match.condition && (
+                      <Divider />
+                      <Button
+                        fullWidth
+                        onClick={() => drivePipelineMutation.mutate()}
+                        loading={drivePipelineMutation.isPending}
+                        size="slim"
+                      >
+                        📸 Search Drive for Photos
+                      </Button>
+                    </BlockStack>
+                  </Card>
+
+                  {/* ── Product Details ── */}
+                  <Card>
+                    <BlockStack gap="300">
+                      <Text variant="headingMd" as="h2">Details</Text>
+                      <Divider />
+                      <BlockStack gap="200">
+                        <InlineStack align="space-between">
+                          <Text variant="bodySm" tone="subdued" as="span">Price</Text>
+                          <Text variant="bodySm" fontWeight="medium" as="span">{formatMoney(variant?.price ?? null)}</Text>
+                        </InlineStack>
+                        {variant?.compare_at_price && (
                           <InlineStack align="space-between">
-                            <Text variant="bodyMd" tone="subdued" as="span">Grade</Text>
-                            <Text variant="bodyMd" fontWeight="medium" as="span">
-                              {timData.match.condition.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
-                            </Text>
+                            <Text variant="bodySm" tone="subdued" as="span">Compare-at</Text>
+                            <Text variant="bodySm" as="span">{formatMoney(variant.compare_at_price)}</Text>
                           </InlineStack>
                         )}
-                        {timData.match.conditionNotes && (
-                          <BlockStack gap="100">
-                            <Text variant="bodyMd" tone="subdued" as="span">Condition Notes</Text>
-                            <Text variant="bodyMd" as="p">{timData.match.conditionNotes}</Text>
-                          </BlockStack>
-                        )}
-                        {timData.match.graderNotes && (
-                          <BlockStack gap="100">
-                            <Text variant="bodyMd" tone="subdued" as="span">Grader Notes</Text>
-                            <Text variant="bodyMd" as="p">{timData.match.graderNotes}</Text>
-                          </BlockStack>
-                        )}
-                        {timData.match.serialNumber && (
+                        <InlineStack align="space-between">
+                          <Text variant="bodySm" tone="subdued" as="span">SKU</Text>
+                          <span style={{ fontFamily: 'SF Mono, monospace', fontSize: '13px' }}>
+                            {variant?.sku ?? '—'}
+                          </span>
+                        </InlineStack>
+                        {variant?.barcode && (
                           <InlineStack align="space-between">
-                            <Text variant="bodyMd" tone="subdued" as="span">Serial #</Text>
-                            <span style={{ fontFamily: 'SF Mono, monospace' }}>
-                              <Text variant="bodyMd" as="span">{timData.match.serialNumber}</Text>
+                            <Text variant="bodySm" tone="subdued" as="span">Barcode</Text>
+                            <span style={{ fontFamily: 'SF Mono, monospace', fontSize: '13px' }}>
+                              {variant.barcode}
                             </span>
                           </InlineStack>
                         )}
                         <InlineStack align="space-between">
-                          <Text variant="bodyMd" tone="subdued" as="span">TIM Status</Text>
-                          <Text variant="bodyMd" as="span">{timData.match.itemStatus.replace(/_/g, ' ')}</Text>
+                          <Text variant="bodySm" tone="subdued" as="span">Inventory</Text>
+                          <Text variant="bodySm" fontWeight="medium" as="span">{variant?.inventory_quantity ?? '—'}</Text>
                         </InlineStack>
-                        <Divider />
+                        {product.vendor && (
+                          <InlineStack align="space-between">
+                            <Text variant="bodySm" tone="subdued" as="span">Vendor</Text>
+                            <Text variant="bodySm" as="span">{product.vendor}</Text>
+                          </InlineStack>
+                        )}
+                        {product.product_type && (
+                          <InlineStack align="space-between">
+                            <Text variant="bodySm" tone="subdued" as="span">Type</Text>
+                            <Text variant="bodySm" as="span">{product.product_type}</Text>
+                          </InlineStack>
+                        )}
+                      </BlockStack>
+                      {product.tags && (
+                        <>
+                          <Divider />
+                          <InlineStack gap="100" wrap>
+                            {(typeof product.tags === 'string' ? product.tags.split(',') : product.tags)
+                              .filter((t: string) => t.trim())
+                              .map((tag: string) => (
+                                <Badge key={tag.trim()}>{tag.trim()}</Badge>
+                              ))}
+                          </InlineStack>
+                        </>
+                      )}
+                    </BlockStack>
+                  </Card>
+
+                  {/* ── TIM Condition (compact) ── */}
+                  {(timData?.match || timLoading) && (
+                    <Card>
+                      <BlockStack gap="300">
                         <InlineStack align="space-between" blockAlign="center">
-                          <BlockStack gap="100">
-                            <Text variant="bodyMd" tone="subdued" as="span">Condition Tag</Text>
-                            {(() => {
-                              const tags = typeof product.tags === 'string' ? product.tags.split(',').map((t: string) => t.trim()) : (product.tags ?? []);
-                              const conditionTag = tags.find((t: string) => t.startsWith('condition-'));
-                              return conditionTag ? (
-                                <Badge tone="success">{conditionTag}</Badge>
-                              ) : (
-                                <Badge tone="attention">Not tagged</Badge>
-                              );
-                            })()}
-                          </BlockStack>
-                          {timData.match.condition && (
-                            <Button
-                              size="slim"
-                              onClick={() => tagMutation.mutate()}
-                              loading={tagMutation.isPending}
-                              disabled={tagMutation.isPending}
-                            >
+                          <Text variant="headingMd" as="h2">Condition</Text>
+                          {timConditionLabel && (
+                            <Badge tone={
+                              timData!.match!.condition === 'like_new_minus' || timData!.match!.condition === 'excellent_plus' ? 'success' :
+                              timData!.match!.condition === 'excellent' ? 'success' :
+                              timData!.match!.condition === 'poor' || timData!.match!.condition === 'ugly' ? 'warning' : 'info'
+                            }>
+                              {timConditionLabel}
+                            </Badge>
+                          )}
+                        </InlineStack>
+                        {timLoading ? (
+                          <div style={{ padding: '8px', textAlign: 'center' }}>
+                            <Spinner size="small" />
+                          </div>
+                        ) : timData?.match ? (
+                          <BlockStack gap="200">
+                            {timData.match.conditionNotes && (
+                              <Text variant="bodySm" as="p">{timData.match.conditionNotes}</Text>
+                            )}
+                            {timData.match.graderNotes && (
+                              <Text variant="bodySm" tone="subdued" as="p">{timData.match.graderNotes}</Text>
+                            )}
+                            {timData.match.serialNumber && (
+                              <InlineStack align="space-between">
+                                <Text variant="bodySm" tone="subdued" as="span">Serial #</Text>
+                                <span style={{ fontFamily: 'SF Mono, monospace', fontSize: '13px' }}>
+                                  {timData.match.serialNumber}
+                                </span>
+                              </InlineStack>
+                            )}
+                            <Divider />
+                            <InlineStack align="space-between" blockAlign="center">
                               {(() => {
                                 const tags = typeof product.tags === 'string' ? product.tags.split(',').map((t: string) => t.trim()) : (product.tags ?? []);
                                 const conditionTag = tags.find((t: string) => t.startsWith('condition-'));
-                                return conditionTag ? 'Update Tag' : 'Tag Product';
+                                return conditionTag ? (
+                                  <Badge tone="success">{conditionTag}</Badge>
+                                ) : (
+                                  <Badge tone="attention">Not tagged</Badge>
+                                );
                               })()}
-                            </Button>
+                              {timData.match.condition && (
+                                <Button
+                                  size="slim"
+                                  onClick={() => tagMutation.mutate()}
+                                  loading={tagMutation.isPending}
+                                >
+                                  {(() => {
+                                    const tags = typeof product.tags === 'string' ? product.tags.split(',').map((t: string) => t.trim()) : (product.tags ?? []);
+                                    const conditionTag = tags.find((t: string) => t.startsWith('condition-'));
+                                    return conditionTag ? 'Update Tag' : 'Tag Product';
+                                  })()}
+                                </Button>
+                              )}
+                            </InlineStack>
+                            {tagMutation.isSuccess && tagMutation.data && (
+                              <Banner tone="success" onDismiss={() => tagMutation.reset()}>
+                                {(tagMutation.data as any).newTag
+                                  ? `Tagged: ${(tagMutation.data as any).newTag}`
+                                  : 'Tag applied successfully'}
+                              </Banner>
+                            )}
+                            {tagMutation.isError && (
+                              <Banner tone="critical" onDismiss={() => tagMutation.reset()}>
+                                Failed to apply tag
+                              </Banner>
+                            )}
+                          </BlockStack>
+                        ) : null}
+                      </BlockStack>
+                    </Card>
+                  )}
+
+                  {/* ── eBay Listing (compact) ── */}
+                  {listing?.ebayListingId && (
+                    <Card>
+                      <BlockStack gap="300">
+                        <InlineStack align="space-between" blockAlign="center">
+                          <Text variant="headingMd" as="h2">eBay</Text>
+                          {listing.ebayListingId.startsWith('draft-') ? (
+                            <Badge tone="attention">Draft</Badge>
+                          ) : (
+                            <Badge tone={listing.status === 'active' || listing.status === 'synced' ? 'success' : 'info'}>
+                              {listing.status === 'synced' ? 'Live' : listing.status}
+                            </Badge>
                           )}
                         </InlineStack>
-                        {tagMutation.isSuccess && tagMutation.data && (
-                          <Banner tone="success" onDismiss={() => tagMutation.reset()}>
-                            {(tagMutation.data as any).newTag
-                              ? `Tagged: ${(tagMutation.data as any).newTag}`
-                              : 'Tag applied successfully'}
-                          </Banner>
-                        )}
-                        {tagMutation.isError && (
-                          <Banner tone="critical" onDismiss={() => tagMutation.reset()}>
-                            Failed to apply tag
-                          </Banner>
-                        )}
-                      </BlockStack>
-                    ) : (
-                      <Text variant="bodyMd" tone="subdued" as="p">
-                        No TIM data — {timData?.reason || 'no matching item found'}
-                      </Text>
-                    )}
-                  </BlockStack>
-                </Card>
-
-                {/* ── eBay Listing Status ── */}
-                <Card>
-                  <BlockStack gap="400">
-                    <InlineStack align="space-between" blockAlign="center">
-                      <Text variant="headingMd" as="h2">eBay Listing</Text>
-                      {listing?.ebayListingId && (
-                        listing.ebayListingId.startsWith('draft-') ? (
-                          <Badge tone="attention">Draft</Badge>
-                        ) : (
-                          <Badge tone={listing.status === 'active' || listing.status === 'synced' ? 'success' : 'info'}>
-                            {listing.status === 'synced' ? 'Live' : listing.status}
-                          </Badge>
-                        )
-                      )}
-                    </InlineStack>
-                    <Divider />
-                    {listing?.ebayListingId ? (
-                      <BlockStack gap="400">
-                        <BlockStack gap="300">
-                          <InlineStack align="space-between">
-                            <Text variant="bodyMd" tone="subdued" as="span">Status</Text>
-                            <Text variant="bodyMd" fontWeight="medium" as="span">
-                              {listing.ebayListingId.startsWith('draft-') ? 'Draft (not published)' : 'Published'}
-                            </Text>
-                          </InlineStack>
-                          <InlineStack align="space-between">
-                            <Text variant="bodyMd" tone="subdued" as="span">eBay Item ID</Text>
-                            <span style={{ fontFamily: 'SF Mono, monospace' }}>
-                              <Text variant="bodyMd" as="span">{listing.ebayListingId}</Text>
-                            </span>
-                          </InlineStack>
-                        </BlockStack>
-                        
+                        <InlineStack align="space-between">
+                          <Text variant="bodySm" tone="subdued" as="span">Item ID</Text>
+                          <span style={{ fontFamily: 'SF Mono, monospace', fontSize: '13px' }}>
+                            {listing.ebayListingId}
+                          </span>
+                        </InlineStack>
                         <BlockStack gap="200">
                           {!listing.ebayListingId.startsWith('draft-') && (
                             <Button
                               fullWidth
-                              variant="secondary"
-                              icon={<ExternalLink className="w-4 h-4" />}
+                              size="slim"
                               url={`https://www.ebay.com/itm/${listing.ebayListingId}`}
                               external
                             >
@@ -1295,234 +1349,40 @@ export const ShopifyProductDetail: React.FC = () => {
                           <Button
                             fullWidth
                             variant="plain"
+                            size="slim"
                             onClick={() => navigate(`/ebay/listings/${listing.shopifyProductId}`)}
                           >
-                            View Listing Details
+                            Listing Details
                           </Button>
                         </BlockStack>
                       </BlockStack>
-                    ) : (
-                      <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                        <Text tone="subdued" as="p">Not listed on eBay yet</Text>
-                        <Text variant="bodySm" tone="subdued" as="p">Run the pipeline to create an eBay listing</Text>
-                      </div>
-                    )}
-                  </BlockStack>
-                </Card>
+                    </Card>
+                  )}
 
-                {/* ── Pipeline Status ── */}
-                <Card>
-                  <BlockStack gap="400">
-                    <InlineStack align="space-between" blockAlign="center">
-                      <Text variant="headingMd" as="h2">Pipeline Status</Text>
-                      {pipelineJob?.status && (
-                        <Badge 
-                          tone={
-                            pipelineJob.status === 'completed' ? 'success' :
-                            pipelineJob.status === 'failed' ? 'critical' :
-                            pipelineJob.status === 'running' ? 'attention' : 'info'
-                          }
-                        >
-                          {pipelineJob.status}
-                        </Badge>
-                      )}
-                    </InlineStack>
-                    <Divider />
-                    {pipelineSteps.length === 0 ? (
-                      <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                        <Text tone="subdued" as="p">No pipeline runs yet</Text>
-                        <Text variant="bodySm" tone="subdued" as="p">Run the pipeline to start processing</Text>
-                      </div>
-                    ) : (
-                      <BlockStack gap="0">
-                        {pipelineSteps.map((step: any, index: number) => {
-                          const isLast = index === pipelineSteps.length - 1;
-                          const isDone = step.status === 'done';
-                          const isError = step.status === 'error';
-                          const isRunning = step.status === 'running';
-                          
-                          return (
-                            <div key={step.name} style={{ position: 'relative' }}>
-                              <InlineStack gap="300" blockAlign="start">
-                                {/* Timeline indicator */}
-                                <div style={{ position: 'relative', marginTop: '2px' }}>
-                                  <div
-                                    style={{
-                                      width: '16px',
-                                      height: '16px',
-                                      borderRadius: '50%',
-                                      border: `2px solid ${
-                                        isDone ? '#22c55e' :
-                                        isError ? '#ef4444' :
-                                        isRunning ? '#f59e0b' : '#d1d5db'
-                                      }`,
-                                      backgroundColor: isDone ? '#22c55e' : '#ffffff',
-                                      position: 'relative',
-                                      zIndex: 1
-                                    }}
-                                  >
-                                    {isRunning && (
-                                      <div
-                                        style={{
-                                          position: 'absolute',
-                                          inset: '2px',
-                                          borderRadius: '50%',
-                                          backgroundColor: '#f59e0b',
-                                          animation: 'pulse 2s infinite'
-                                        }}
-                                      />
-                                    )}
-                                  </div>
-                                  {/* Connecting line */}
-                                  {!isLast && (
-                                    <div
-                                      style={{
-                                        position: 'absolute',
-                                        top: '18px',
-                                        left: '50%',
-                                        transform: 'translateX(-50%)',
-                                        width: '2px',
-                                        height: '24px',
-                                        backgroundColor: '#e5e7eb'
-                                      }}
-                                    />
-                                  )}
-                                </div>
-                                
-                                {/* Step content */}
-                                <div style={{ flex: 1, paddingBottom: isLast ? '0' : '16px' }}>
-                                  <BlockStack gap="100">
-                                  <InlineStack align="space-between" blockAlign="center">
-                                    <Text 
-                                      as="span" 
-                                      variant="bodySm" 
-                                      fontWeight={isDone ? 'medium' : 'regular'}
-                                      tone={isError ? 'critical' : undefined}
-                                    >
-                                      {getStepDisplayName(step.name)}
-                                    </Text>
-                                    <Text 
-                                      as="span" 
-                                      variant="bodySm" 
-                                      tone={
-                                        isDone ? 'success' :
-                                        isError ? 'critical' :
-                                        isRunning ? 'subdued' : 'subdued'
-                                      }
-                                    >
-                                      {isDone ? '✓' : isError ? '✗' : isRunning ? '⋯' : '○'}
-                                    </Text>
-                                  </InlineStack>
-                                  {step.error && (
-                                    <Text variant="bodySm" tone="critical" as="p">{step.error}</Text>
-                                  )}
-                                  </BlockStack>
-                                </div>
-                              </InlineStack>
-                            </div>
-                          );
-                        })}
-                      </BlockStack>
-                    )}
-                  </BlockStack>
-                </Card>
+                </BlockStack>
+              </Layout.Section>
+            </Layout>
+          </div>
+        )}
 
-                {/* ── Quick Actions ── */}
-                <Card>
-                  <BlockStack gap="400">
-                    <Text variant="headingMd" as="h2">Quick Actions</Text>
-                    <Divider />
-                    <BlockStack gap="200">
-                      <Button
-                        fullWidth
-                        variant="secondary"
-                        icon={<ExternalLink className="w-4 h-4" />}
-                        url={`https://admin.shopify.com/store/usedcameragear/products/${id}`}
-                        external
-                      >
-                        View in Shopify Admin
-                      </Button>
-                      {product?.handle && (
-                        <Button
-                          fullWidth
-                          variant="plain"
-                          icon={<ExternalLink className="w-4 h-4" />}
-                          url={`https://usedcameragear.myshopify.com/products/${product.handle}`}
-                          external
-                        >
-                          View Live Product Page
-                        </Button>
-                      )}
-                      <Button
-                        fullWidth
-                        variant="primary"
-                        loading={runPipelineMutation.isPending}
-                        onClick={() => runPipelineMutation.mutate()}
-                      >
-                        🚀 Run Full Pipeline
-                      </Button>
-                      <Button
-                        fullWidth
-                        loading={drivePipelineMutation.isPending}
-                        onClick={() => drivePipelineMutation.mutate()}
-                      >
-                        📸 Run Pipeline (Drive Search)
-                      </Button>
-                      {drivePipelineResult && (
-                        <Banner
-                          title={drivePipelineResult.success ? 'Drive Pipeline Complete' : 'Drive Pipeline Issue'}
-                          tone={drivePipelineResult.success ? 'success' : 'warning'}
-                          onDismiss={() => setDrivePipelineResult(null)}
-                        >
-                          {drivePipelineResult.success ? (
-                            <BlockStack gap="100">
-                              <Text as="p" variant="bodySm">Found {drivePipelineResult.photos?.count} photos in {drivePipelineResult.photos?.presetName}/{drivePipelineResult.photos?.folderName}</Text>
-                              {drivePipelineResult.description?.generated && <Text as="p" variant="bodySm">✅ AI description generated</Text>}
-                              {drivePipelineResult.condition?.tagApplied && <Text as="p" variant="bodySm">✅ {drivePipelineResult.condition.tag}</Text>}
-                            </BlockStack>
-                          ) : (
-                            <Text as="p" variant="bodySm">{drivePipelineResult.error}</Text>
-                          )}
-                        </Banner>
-                      )}
-                    </BlockStack>
-                  </BlockStack>
-                </Card>
-
-              </BlockStack>
-            </Layout.Section>
-          </Layout>
-
-          {/* ── Photo Controls Modal/Panel ── */}
-          {showPhotoControls && (
-            <div style={{ marginTop: '1rem' }}>
-              <PhotoControls
-                selectedImageUrl={selectedImageUrl}
-                onReprocess={handleReprocess}
-                onReprocessAll={handleReprocessAll}
-                reprocessing={reprocessMutation.isPending}
-                reprocessingAll={reprocessAllMutation.isPending}
-                previewUrl={previewUrl}
-                imageCount={images.length}
-              />
-            </div>
-          )}
-
-          {/* ── Templates Section ── */}
+        {/* ── Photo Controls Modal/Panel ── */}
+        {showPhotoControls && (
           <div style={{ marginTop: '1rem' }}>
-            <TemplateManager
-              productId={id}
-              onApplied={() => {
-                queryClient.invalidateQueries({ queryKey: ['product-images', id] });
-              }}
+            <PhotoControls
+              selectedImageUrl={selectedImageUrl}
+              onReprocess={handleReprocess}
+              onReprocessAll={handleReprocessAll}
+              reprocessing={reprocessMutation.isPending}
+              reprocessingAll={reprocessAllMutation.isPending}
+              previewUrl={previewUrl}
+              imageCount={images.length}
             />
           </div>
-        </>
-      )}
-    </Page>
+        )}
 
-    {/* Pipeline Review Modal removed — review now at /review/:id */}
-    </div>
+        <div style={{ height: '2rem' }} />
+      </Page>
+    </>
   );
 };
 
@@ -1554,7 +1414,6 @@ const ShopifyProducts: React.FC = () => {
 
   const products = useMemo(() => data?.products ?? [], [data?.products]);
 
-  // Pre-compute counts for tab badges
   const tabCounts = useMemo(() => {
     const nonArchived = products.filter((p) => (p.shopifyStatus ?? '').toLowerCase() !== 'archived');
     return {
@@ -1578,43 +1437,22 @@ const ShopifyProducts: React.FC = () => {
 
   const filtered = useMemo(() => {
     const query = searchValue.trim().toLowerCase();
-
-    const result = products.filter((product) => {
-      // Exclude archived products
+    return products.filter((product) => {
       if ((product.shopifyStatus ?? '').toLowerCase() === 'archived') return false;
-
-      // Search query filter
-      const matchesQuery =
-        !query ||
-        product.title.toLowerCase().includes(query) ||
-        product.sku.toLowerCase().includes(query);
-
+      const matchesQuery = !query || product.title.toLowerCase().includes(query) || product.sku.toLowerCase().includes(query);
       if (!matchesQuery) return false;
-
-      // Status filter
       const productStatus = (product.shopifyStatus ?? '').toLowerCase();
-      
       switch (statusFilter) {
-        case 'draft':
-          return productStatus === 'draft';
-        case 'active':
-          return productStatus === 'active';
-        case 'needs_description':
-          return !product.hasAiDescription;
-        case 'needs_images':
-          return !product.hasProcessedImages;
-        case 'listed':
-          return product.ebayStatus === 'listed' || product.ebayStatus === 'draft';
-        case 'all':
-        default:
-          return true;
+        case 'draft': return productStatus === 'draft';
+        case 'active': return productStatus === 'active';
+        case 'needs_description': return !product.hasAiDescription;
+        case 'needs_images': return !product.hasProcessedImages;
+        case 'listed': return product.ebayStatus === 'listed' || product.ebayStatus === 'draft';
+        default: return true;
       }
     });
-
-    return result;
   }, [products, searchValue, statusFilter]);
 
-  // Always sort: drafts first, then active, then alphabetical
   const sorted = useMemo(() => {
     const rank = { draft: 0, active: 1 } as Record<string, number>;
     return [...filtered].sort((a, b) => {
