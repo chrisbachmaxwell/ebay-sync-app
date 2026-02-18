@@ -407,9 +407,8 @@ const ReviewDetail: React.FC = () => {
                     {(draftImages.length > 0 ? draftImages : liveImages).map((img, i) => (
                       <div
                         key={i}
-                        onClick={() => setLightboxSrc(img)}
                         style={{
-                          cursor: 'zoom-in',
+                          position: 'relative',
                           borderRadius: '8px',
                           overflow: 'hidden',
                           border: '2px solid #e3e5e7',
@@ -419,8 +418,30 @@ const ReviewDetail: React.FC = () => {
                         <img
                           src={img}
                           alt={`Photo ${i + 1}`}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onClick={() => setLightboxSrc(img)}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in' }}
                         />
+                        {draft.status === 'pending' && draftImages.length > 0 && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setEditingPhotoIndex(i); }}
+                            style={{
+                              position: 'absolute',
+                              bottom: '8px',
+                              right: '8px',
+                              background: 'rgba(0,0,0,0.7)',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: '6px',
+                              padding: '4px 10px',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                            title="Edit photo position/rotation"
+                          >
+                            ✏️ Edit
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
