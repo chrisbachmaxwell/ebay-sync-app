@@ -45,7 +45,7 @@ const DEFAULT_TRANSFORM: Transform = {
 };
 
 // Canvas output size (square, matching typical product photo dimensions)
-const CANVAS_SIZE = 1200;
+const CANVAS_SIZE = 4000;
 const WATERMARK_FONT_SIZE = 24;
 const WATERMARK_PADDING = 20;
 
