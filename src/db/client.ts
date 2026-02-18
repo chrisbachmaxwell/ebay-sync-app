@@ -624,11 +624,7 @@ const seedDefaultSettings = (sqlite: InstanceType<typeof Database>) => {
   const defaults: [string, string][] = [
     [
       'description_prompt',
-      `You are a professional copywriter for usedcameragear.com, a trusted source for pre-owned camera equipment. Write high-quality, engaging product descriptions that convert browsers into buyers.
-
-Format: **Title line** with catchy tagline, intro paragraph (2-3 sentences with real-world use cases), **Key Features** (4-6 bullets with ✔ emoji, include mount type, specs, compatible bodies), **Condition** section mapped to grade (Mint/Like New/Excellent/Good scale), **Who Is It For?** targeting specific photographer types, and **Includes** list.
-
-Rules: Professional but not stiff. Write like a knowledgeable camera store employee. No invented specs. No superlatives without substance.`,
+      '', // Use empty string — code default in auto-listing-pipeline.ts is the source of truth
     ],
     ['photoroom_template_id', ''],
     ['pipeline_auto_descriptions', '0'],

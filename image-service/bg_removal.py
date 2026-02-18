@@ -1,56 +1,76 @@
-"""Background removal using u2net ONNX model directly (no rembg dependency)."""
+"""Background removal using BiRefNet ONNX model (replaces u2net).
+
+BiRefNet is the same architecture used by BRIA RMBG-2.0, providing
+significantly better edge quality, especially for:
+- White-on-white products
+- Reflective/transparent surfaces  
+- Complex shapes (tripods, cables, thin structures)
+- Fine detail preservation
+
+Model: onnx-community/BiRefNet-ONNX (MIT license)
+Input: 1024x1024 RGB, ImageNet normalization
+Output: sigmoid mask (multiple outputs, last is best)
+"""
 
 import io
 import os
 import numpy as np
 from PIL import Image
 import onnxruntime as ort
-import pooch
 
-MODEL_URL = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx"
-MODEL_HASH = None  # skip hash check
-MODEL_DIR = os.path.expanduser("~/.u2net")
+MODEL_DIR = os.path.expanduser("~/.birefnet")
+MODEL_PATH = os.path.join(MODEL_DIR, "model_lite.onnx")
+MODEL_URL = "https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model.onnx"
+
+# BiRefNet uses 1024x1024 input (vs u2net's 320x320)
+INPUT_SIZE = 1024
 
 _session = None
 
 
 def _get_model_path() -> str:
-    """Download u2net.onnx if not cached."""
-    path = os.path.join(MODEL_DIR, "u2net.onnx")
-    if os.path.exists(path):
-        return path
+    """Download BiRefNet ONNX if not cached."""
+    if os.path.exists(MODEL_PATH):
+        return MODEL_PATH
     os.makedirs(MODEL_DIR, exist_ok=True)
-    print(f"Downloading u2net model to {path}...")
-    pooch.retrieve(MODEL_URL, known_hash=None, fname="u2net.onnx", path=MODEL_DIR)
-    return path
+    print(f"Downloading BiRefNet model to {MODEL_PATH}...")
+    import urllib.request
+    urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+    return MODEL_PATH
 
 
 def _get_session() -> ort.InferenceSession:
     global _session
     if _session is None:
         model_path = _get_model_path()
-        _session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+        # Force CPU only — CoreML can OOM on large models
+        providers = ["CPUExecutionProvider"]
+        _session = ort.InferenceSession(model_path, providers=providers)
+        print(f"BiRefNet loaded with providers: {providers}")
     return _session
 
 
-def _preprocess(img: Image.Image, size: int = 320) -> np.ndarray:
-    """Resize, normalize, convert to NCHW float32."""
-    img = img.convert("RGB").resize((size, size), Image.LANCZOS)
+def _preprocess(img: Image.Image) -> np.ndarray:
+    """Resize to 1024x1024, normalize with ImageNet stats, NCHW float32."""
+    img = img.convert("RGB").resize((INPUT_SIZE, INPUT_SIZE), Image.LANCZOS)
     arr = np.array(img).astype(np.float32) / 255.0
-    # Normalize with ImageNet-ish mean/std
     mean = np.array([0.485, 0.456, 0.406])
     std = np.array([0.229, 0.224, 0.225])
     arr = (arr - mean) / std
-    # HWC -> NCHW
     arr = arr.transpose(2, 0, 1)[np.newaxis, ...]
     return arr.astype(np.float32)
 
 
 def _postprocess(output: np.ndarray, orig_size: tuple[int, int]) -> Image.Image:
-    """Convert model output to alpha mask at original size."""
+    """Convert BiRefNet output to alpha mask at original resolution.
+    
+    BiRefNet outputs a logit map; apply sigmoid then resize.
+    """
     mask = output.squeeze()
-    # Normalize to 0-1
-    mask = (mask - mask.min()) / (mask.max() - mask.min() + 1e-8)
+    # Apply sigmoid (output is logits, not probabilities)
+    mask = 1.0 / (1.0 + np.exp(-mask))
+    # Normalize to full 0-255 range
+    mask = np.clip(mask, 0, 1)
     mask = (mask * 255).astype(np.uint8)
     mask_img = Image.fromarray(mask).resize(orig_size, Image.LANCZOS)
     return mask_img
@@ -63,10 +83,10 @@ def remove_background_pil(image: Image.Image) -> Image.Image:
     input_tensor = _preprocess(image)
     input_name = session.get_inputs()[0].name
     outputs = session.run(None, {input_name: input_tensor})
-    # u2net outputs multiple maps; first is the main one
-    mask = _postprocess(outputs[0], orig_size)
     
-    # Apply mask as alpha channel
+    # BiRefNet outputs multiple maps; last one is the finest/best
+    mask = _postprocess(outputs[-1], orig_size)
+    
     rgba = image.convert("RGBA")
     rgba.putalpha(mask)
     return rgba

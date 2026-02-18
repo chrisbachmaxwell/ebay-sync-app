@@ -131,7 +131,13 @@ async function getDescriptionPrompt(): Promise<string> {
     const row = db
       .prepare(`SELECT value FROM settings WHERE key = 'description_prompt'`)
       .get() as { value: string } | undefined;
-    return row?.value || DEFAULT_DESCRIPTION_PROMPT;
+    // Use code default unless a non-empty custom prompt was explicitly saved
+    const val = row?.value?.trim();
+    if (!val || val.length < 200) return DEFAULT_DESCRIPTION_PROMPT;
+    // If DB has the old short prompt, ignore it in favor of the better code default
+    if (val.includes('Format: **Title line**') && !val.includes('Format your output as follows'))
+      return DEFAULT_DESCRIPTION_PROMPT;
+    return val;
   } catch {
     return DEFAULT_DESCRIPTION_PROMPT;
   }

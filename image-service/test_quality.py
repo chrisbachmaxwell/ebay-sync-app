@@ -109,7 +109,7 @@ def analyze_quality(original_path, processed_path):
         if below_subject.size > 0:
             dark_below = np.sum(np.all(below_subject[:, :, :3] < 200, axis=2))
             metrics["shadow_pixels_below"] = int(dark_below)
-            metrics["has_visible_shadow"] = dark_below > 100
+            metrics["has_visible_shadow"] = bool(dark_below > 100)
     
     # Overall brightness/contrast check
     gray = np.mean(rgb, axis=2)

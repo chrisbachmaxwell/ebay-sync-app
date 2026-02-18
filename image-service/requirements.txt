@@ -1,7 +1,8 @@
-rembg[cpu]
 fastapi
 uvicorn
 pillow
 python-multipart
 numpy
 psutil
+onnxruntime
+pooch
