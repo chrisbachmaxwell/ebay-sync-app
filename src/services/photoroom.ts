@@ -116,7 +116,7 @@ export class PhotoRoomService {
   async processWithUniformPadding(
     imageUrl: string,
     options?: { minPadding?: number; shadow?: boolean; canvasSize?: number },
-  ): Promise<{ buffer: Buffer; dataUrl: string; cleanBuffer?: Buffer }> {
+  ): Promise<{ buffer: Buffer; dataUrl: string; cleanBuffer?: Buffer; cutoutBuffer?: Buffer }> {
     const minPad = options?.minPadding ?? 100;
     const shadow = options?.shadow ?? true;
     const canvasSize = options?.canvasSize ?? 1200;
@@ -193,17 +193,23 @@ export class PhotoRoomService {
     // Save the clean product-on-white canvas (no watermarks) for the photo editor
     const cleanBuffer = finalBuffer;
 
+    // Save the raw cutout (transparent bg, no shadow) for the rotation editor
+    const cutoutBuffer = await sharp(trimmed.data)
+      .resize(scaledW, scaledH, { fit: 'inside' })
+      .png()
+      .toBuffer();
+
     // Step 5: Apply template overlay
     try {
       const base64 = finalBuffer.toString('base64');
       const dataUrl = `data:image/png;base64,${base64}`;
       const templateBuffer = await this.renderWithTemplate(dataUrl);
       const templateBase64 = templateBuffer.toString('base64');
-      return { buffer: templateBuffer, dataUrl: `data:image/png;base64,${templateBase64}`, cleanBuffer };
+      return { buffer: templateBuffer, dataUrl: `data:image/png;base64,${templateBase64}`, cleanBuffer, cutoutBuffer };
     } catch (templateErr) {
       warn(`[PhotoRoom] Template overlay failed, returning without template: ${templateErr}`);
       const base64 = finalBuffer.toString('base64');
-      return { buffer: finalBuffer, dataUrl: `data:image/png;base64,${base64}`, cleanBuffer };
+      return { buffer: finalBuffer, dataUrl: `data:image/png;base64,${base64}`, cleanBuffer, cutoutBuffer };
     }
   }
 
@@ -218,7 +224,7 @@ export class PhotoRoomService {
   async processWithParams(
     imageUrl: string,
     params: { background?: string; padding?: number; shadow?: boolean },
-  ): Promise<{ buffer: Buffer; dataUrl: string; cleanBuffer?: Buffer }> {
+  ): Promise<{ buffer: Buffer; dataUrl: string; cleanBuffer?: Buffer; cutoutBuffer?: Buffer }> {
     const options: ProcessImageOptions = {
       background: (params.background ?? '#FFFFFF').replace(/^#/, ''),
       padding: params.padding ?? 0.1,

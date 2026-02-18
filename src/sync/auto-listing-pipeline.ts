@@ -498,6 +498,10 @@ export async function autoListProduct(
                 if (result.cleanBuffer) {
                   await uploadProcessedImage(result.cleanBuffer, `${shopifyProductId}_${i}_clean.png`).catch(() => {});
                 }
+                // Save raw cutout (transparent bg, no shadow) for rotation editor
+                if (result.cutoutBuffer) {
+                  await uploadProcessedImage(result.cutoutBuffer, `${shopifyProductId}_${i}_cutout.png`).catch(() => {});
+                }
                 const url = await uploadProcessedImage(buf, `${shopifyProductId}_${i}.png`);
                 info(`[AutoList] Uploaded processed image ${i + 1}: ${url.substring(0, 80)}`);
                 processedImages.push(url);
