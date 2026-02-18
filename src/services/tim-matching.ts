@@ -66,17 +66,31 @@ function mapToConditionData(item: TimItem): TimConditionData {
 /**
  * Format TIM condition data for AI description prompt injection.
  */
+const CONDITION_DESCRIPTIONS: Record<string, string> = {
+  'like_new': 'Like New Minus — Looks like it just came out of the box. 99-100% of original condition.',
+  'like_new_minus': 'Like New Minus — Looks like it just came out of the box. 99-100% of original condition.',
+  'excellent_plus': 'Excellent Plus — Very little to no use, wear only visible under close inspection. 90-99% of original condition.',
+  'excellent': 'Excellent — Normal signs of use appropriate for the age. 75-90% of original condition.',
+  'good_plus': 'Good Plus — Visible wear but fully functional. 65-75% of original condition.',
+  'good': 'Good Plus — Visible wear but fully functional. 65-75% of original condition.',
+  'poor': 'Poor — Excessive wear, brassing, or finish loss but still operational. 50-65% of original condition.',
+};
+
 export function formatConditionForPrompt(data: TimConditionData): string {
   const parts: string[] = [];
 
   if (data.condition) {
-    // Convert snake_case to readable: excellent_plus → Excellent Plus
-    const readable = data.condition.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    parts.push(`TIM Condition Grade: ${readable}`);
+    const desc = CONDITION_DESCRIPTIONS[data.condition];
+    if (desc) {
+      parts.push(`Condition Grade: ${desc}`);
+    } else {
+      const readable = data.condition.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      parts.push(`Condition Grade: ${readable}`);
+    }
   }
 
   if (data.conditionNotes) {
-    parts.push(`Condition Notes: ${data.conditionNotes}`);
+    parts.push(`Grader's Condition Notes: ${data.conditionNotes}`);
   }
 
   if (data.graderNotes) {
@@ -87,5 +101,5 @@ export function formatConditionForPrompt(data: TimConditionData): string {
     parts.push(`Serial Number: ${data.serialNumber}`);
   }
 
-  return parts.join('. ');
+  return parts.join('\n');
 }

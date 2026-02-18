@@ -116,8 +116,13 @@ Key Features
 - Sensor size compatibility (full-frame, APS-C, etc.)
 
 Condition: {Grade}
-[1-2 sentences. Be specific about optics, cosmetics, and functionality. Use this scale:]
-Mint = virtually new. Like New Minus = near-perfect, faintest marks. Excellent Plus = very minimal signs of use, pristine optics. Excellent = normal wear, all functions perfect. Good Plus = visible wear, fully functional.
+[1-2 sentences describing ONLY the cosmetic/external condition. Do NOT mention optics, glass, sensor, or internal components — we test those separately. Use this exact scale from Pictureline:]
+- Like New Minus: Looks like it just came out of the box. 99-100% of original condition.
+- Excellent Plus: Very little to no use, wear only visible under close inspection. 90-99% of original condition.
+- Excellent: Normal signs of use appropriate for the age. Most enthusiast/beginning pro gear falls here. 75-90% of original condition.
+- Good Plus: Visible wear but fully functional. 65-75% of original condition.
+- Poor: Excessive wear, brassing, or finish loss but still operational. 50-65% of original condition.
+[Match the description to the grade. Do NOT speculate about optics, internal condition, or functionality beyond what the grade implies.]
 
 Who Is It For?
 [1-2 sentences. Name a specific photographer type and shooting scenario.]
