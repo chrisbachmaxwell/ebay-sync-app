@@ -476,6 +476,15 @@
   to { transform: rotate(360deg); }
 }
 
+/* Pipeline progress component */
+.pipeline-progress-container {
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fafbfc;
+  margin-bottom: 8px;
+}
+
 /* Responsive: stack vertically on small screens */
 @media (max-width: 768px) {
   .pipeline-flow {

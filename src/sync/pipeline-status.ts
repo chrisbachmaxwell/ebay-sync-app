@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { info } from '../utils/logger.js';
 import { getRawDb } from '../db/client.js';
 
@@ -7,12 +8,32 @@ import { getRawDb } from '../db/client.js';
 
 export type StepName =
   | 'fetch_product'
+  | 'tim_condition'
+  | 'drive_search'
   | 'generate_description'
   | 'process_images'
   | 'create_ebay_listing';
 
 export type StepStatus = 'pending' | 'running' | 'done' | 'error';
 export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed';
+
+// ---------------------------------------------------------------------------
+// Event emitter for real-time SSE streaming
+// ---------------------------------------------------------------------------
+
+export interface PipelineEvent {
+  jobId: string;
+  step: StepName;
+  status: StepStatus;
+  detail?: string;
+  progress?: { current: number; total: number };
+  timestamp: string;
+  jobStatus?: JobStatus;
+  shopifyTitle?: string;
+}
+
+export const pipelineEvents = new EventEmitter();
+pipelineEvents.setMaxListeners(100);
 
 export interface PipelineStep {
   name: StepName;
@@ -42,16 +63,20 @@ const jobs: Map<string, PipelineJob> = new Map();
 
 const STEP_NAMES: StepName[] = [
   'fetch_product',
+  'tim_condition',
+  'drive_search',
   'generate_description',
   'process_images',
   'create_ebay_listing',
 ];
 
 const STEP_LABELS: Record<StepName, string> = {
-  fetch_product: 'Shopify Import',
-  generate_description: 'AI Description',
-  process_images: 'Image Processing',
-  create_ebay_listing: 'eBay Listing',
+  fetch_product: 'Fetch Product',
+  tim_condition: 'TIM Condition',
+  drive_search: 'Search Drive',
+  generate_description: 'Generate Description',
+  process_images: 'Process Images',
+  create_ebay_listing: 'Save Draft',
 };
 
 const toEpochSeconds = (iso?: string) =>
@@ -191,6 +216,43 @@ export async function updatePipelineStep(
 
   job.updatedAt = new Date().toISOString();
   await persistJob(job);
+
+  // Emit real-time event for SSE subscribers
+  const event: PipelineEvent = {
+    jobId,
+    step: stepName,
+    status,
+    detail: result,
+    timestamp: new Date().toISOString(),
+    jobStatus: job.status,
+    shopifyTitle: job.shopifyTitle,
+  };
+  pipelineEvents.emit(`job:${jobId}`, event);
+  pipelineEvents.emit('job:*', event);
+}
+
+/** Emit a progress sub-event (e.g. image 3/7) without changing step status. */
+export function emitProgress(
+  jobId: string,
+  stepName: StepName,
+  current: number,
+  total: number,
+  detail?: string,
+): void {
+  const job = jobs.get(jobId);
+  if (!job) return;
+  const event: PipelineEvent = {
+    jobId,
+    step: stepName,
+    status: 'running',
+    detail,
+    progress: { current, total },
+    timestamp: new Date().toISOString(),
+    jobStatus: job.status,
+    shopifyTitle: job.shopifyTitle,
+  };
+  pipelineEvents.emit(`job:${jobId}`, event);
+  pipelineEvents.emit('job:*', event);
 }
 
 export async function setPipelineJobTitle(jobId: string, title: string): Promise<void> {

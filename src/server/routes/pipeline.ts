@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getRawDb } from '../../db/client.js';
 import { info, error as logError } from '../../utils/logger.js';
+import { pipelineEvents, type PipelineEvent } from '../../sync/pipeline-status.js';
 
 const router = Router();
 
@@ -75,6 +76,85 @@ router.get('/api/pipeline/jobs/:id', (req, res) => {
     .catch((err) => {
       res.status(500).json({ error: 'Failed to fetch job', detail: String(err) });
     });
+});
+
+/**
+ * GET /api/pipeline/jobs/:id/stream
+ * SSE stream for real-time pipeline job updates.
+ */
+router.get('/api/pipeline/jobs/:id/stream', (req, res) => {
+  const jobId = req.params.id;
+  info(`[SSE] Client connected for job ${jobId}`);
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write('\n');
+
+  // Send current state first
+  getRawDb().then((db) => {
+    const row = db.prepare(`SELECT * FROM pipeline_jobs WHERE id = ?`).get(jobId) as any;
+    if (row) {
+      const steps = row.steps_json ? JSON.parse(row.steps_json) : [];
+      res.write(`data: ${JSON.stringify({ type: 'snapshot', job: { id: row.id, status: row.status, currentStep: row.current_step, shopifyTitle: row.shopify_title, steps, startedAt: row.started_at, completedAt: row.completed_at, error: row.error } })}\n\n`);
+    }
+  }).catch(() => {});
+
+  const handler = (event: PipelineEvent) => {
+    try {
+      res.write(`data: ${JSON.stringify({ type: 'step', ...event })}\n\n`);
+      if (event.jobStatus === 'completed' || event.jobStatus === 'failed') {
+        res.write(`data: ${JSON.stringify({ type: 'complete', jobId, status: event.jobStatus, shopifyTitle: event.shopifyTitle })}\n\n`);
+      }
+    } catch { /* client disconnected */ }
+  };
+
+  pipelineEvents.on(`job:${jobId}`, handler);
+
+  // Heartbeat every 30s
+  const heartbeat = setInterval(() => {
+    try { res.write(': heartbeat\n\n'); } catch { clearInterval(heartbeat); }
+  }, 30000);
+
+  req.on('close', () => {
+    info(`[SSE] Client disconnected for job ${jobId}`);
+    pipelineEvents.off(`job:${jobId}`, handler);
+    clearInterval(heartbeat);
+  });
+});
+
+/**
+ * GET /api/pipeline/stream
+ * SSE stream for ALL pipeline job updates (for toast notifications).
+ */
+router.get('/api/pipeline/stream', (req, res) => {
+  info(`[SSE] Client connected for all jobs`);
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write('\n');
+
+  const handler = (event: PipelineEvent) => {
+    try { res.write(`data: ${JSON.stringify({ type: 'step', ...event })}\n\n`); } catch {}
+  };
+
+  pipelineEvents.on('job:*', handler);
+
+  const heartbeat = setInterval(() => {
+    try { res.write(': heartbeat\n\n'); } catch { clearInterval(heartbeat); }
+  }, 30000);
+
+  req.on('close', () => {
+    pipelineEvents.off('job:*', handler);
+    clearInterval(heartbeat);
+  });
 });
 
 /**

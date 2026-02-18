@@ -123,9 +123,14 @@ export class PhotoRoomService {
 
     info(`[PhotoRoom] Processing with uniform padding (${minPad}px min): ${imageUrl.substring(0, 60)}...`);
 
-    // Step 0: Download and auto-rotate based on EXIF orientation
+    // Step 0: Download, auto-rotate, and resize for PhotoRoom (max 2000px — saves bandwidth + speed)
     const rawBuffer = await this.downloadImage(imageUrl);
-    const imageBuffer = await sharp(rawBuffer).rotate().toBuffer(); // auto-rotate from EXIF
+    const imageBuffer = await sharp(rawBuffer)
+      .rotate() // auto-rotate from EXIF
+      .resize(2000, 2000, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 90 })
+      .toBuffer();
+    info(`[PhotoRoom] Sending ${(imageBuffer.length / 1024).toFixed(0)}KB image to PhotoRoom API`);
     const formData = this.buildFormData(imageBuffer, 'image.jpg');
     formData.append('removeBackground', 'true');
     formData.append('background.color', 'transparent');
@@ -137,6 +142,7 @@ export class PhotoRoomService {
       method: 'POST',
       headers: { 'x-api-key': this.apiKey },
       body: formData,
+      signal: AbortSignal.timeout(60_000), // 60 second timeout per image
     });
 
     if (!response.ok) {
@@ -321,7 +327,7 @@ export class PhotoRoomService {
   // ── Helpers ──────────────────────────────────────────────────────────
 
   private async downloadImage(url: string): Promise<Buffer> {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
     if (!res.ok) {
       throw new Error(`Failed to download image (${res.status}): ${url}`);
     }

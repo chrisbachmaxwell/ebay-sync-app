@@ -12,6 +12,7 @@ import {
   startPipelineJob,
   updatePipelineStep,
   setPipelineJobTitle,
+  emitProgress,
 } from './pipeline-status.js';
 import {
   createDraft,
@@ -72,10 +73,15 @@ export async function processNewProduct(
     if (timData) {
       timConditionText = formatConditionForPrompt(timData);
       info(`[AutoList] Found TIM condition for ${title}: ${timData.condition ?? 'ungraded'}`);
+      // Store TIM condition for SSE visibility (accessed by caller)
+      (processNewProduct as any).__lastTimCondition = timData.condition ?? 'ungraded';
+    } else {
+      (processNewProduct as any).__lastTimCondition = null;
     }
   } catch (err) {
     // TIM lookup is optional — continue without it
     logError(`[AutoList] TIM lookup failed (non-fatal): ${err}`);
+    (processNewProduct as any).__lastTimCondition = 'error';
   }
 
   // Run description and category generation in parallel
@@ -274,6 +280,8 @@ export async function processProductImages(
 // autoListProduct — full pipeline: fetch → AI process → save overrides
 // ---------------------------------------------------------------------------
 
+const PIPELINE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minute max per pipeline run
+
 export async function autoListProduct(
   shopifyProductId: string,
 ): Promise<{
@@ -285,6 +293,8 @@ export async function autoListProduct(
   error?: string;
 }> {
   const jobId = await createPipelineJob(shopifyProductId);
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), PIPELINE_TIMEOUT_MS);
 
   const upsertPipelineStatus = async (updates: {
     aiDescriptionGenerated?: boolean;
@@ -367,10 +377,67 @@ export async function autoListProduct(
     await setPipelineJobTitle(jobId, product.title || shopifyProductId);
     await updatePipelineStep(jobId, 'fetch_product', 'done', `Fetched: ${product.title || shopifyProductId}`);
 
-    // ── Step 2: Generate description + category ────────────────────────
+    // ── Step 2: TIM Condition lookup ────────────────────────────────
+    await updatePipelineStep(jobId, 'tim_condition', 'running');
+    let timCondition: string | undefined;
+    try {
+      const { findTimItemForProduct } = await import('../services/tim-matching.js');
+      const { applyConditionTag } = await import('../services/tim-tagging.js');
+      const skus = (product.variants ?? []).map((v: any) => v.sku).filter(Boolean);
+      const timData = await findTimItemForProduct(skus);
+      if (timData?.condition) {
+        timCondition = timData.condition;
+        const tagResult = await applyConditionTag(tokenRow.access_token, shopifyProductId, timData.condition);
+        if (tagResult.success && !tagResult.skipped) {
+          info(`[AutoList] Applied condition tag: ${tagResult.newTag} to product ${shopifyProductId}`);
+        }
+        await updatePipelineStep(jobId, 'tim_condition', 'done', `Condition: ${timData.condition}`);
+      } else {
+        await updatePipelineStep(jobId, 'tim_condition', 'done', 'No TIM record found');
+      }
+    } catch (err) {
+      logError(`[AutoList] TIM tagging failed (non-fatal): ${err}`);
+      await updatePipelineStep(jobId, 'tim_condition', 'done', 'TIM lookup failed (non-fatal)');
+    }
+
+    // ── Step 3: Search drive for product photos ─────────────────────
+    await updatePipelineStep(jobId, 'drive_search', 'running');
+    let driveImages: string[] = [];
+    try {
+      const { searchDriveForProduct, isDriveMounted, getSignedUrls } = await import('../watcher/drive-search.js');
+      if (isDriveMounted()) {
+        const sku = (product.variants?.[0] as any)?.sku ?? '';
+        const skuSuffix = sku.match(/(\d{2,4})$/)?.[1] ?? null;
+        const driveResult = await searchDriveForProduct(product.title || '', skuSuffix);
+        if (driveResult) {
+          driveImages = await getSignedUrls(driveResult.imagePaths);
+          info(`[AutoList] Found ${driveImages.length} photos on drive: ${driveResult.presetName}/${driveResult.folderName}`);
+          await updatePipelineStep(jobId, 'drive_search', 'done', `Found ${driveImages.length} photos in ${driveResult.presetName}/${driveResult.folderName}`);
+        } else {
+          info(`[AutoList] No drive photos found for "${product.title}"`);
+          await updatePipelineStep(jobId, 'drive_search', 'done', 'No drive photos found');
+        }
+      } else {
+        await updatePipelineStep(jobId, 'drive_search', 'done', 'Drive not mounted');
+      }
+    } catch (driveErr) {
+      warn(`[AutoList] Drive search failed (non-fatal): ${driveErr}`);
+      await updatePipelineStep(jobId, 'drive_search', 'done', 'Drive search failed (non-fatal)');
+    }
+
+    // ── Step 4: Generate description + category ────────────────────────
     await updatePipelineStep(jobId, 'generate_description', 'running');
+    emitProgress(jobId, 'generate_description', 0, 2, 'Looking up TIM condition...');
 
     const result = await processNewProduct(product);
+
+    // Emit TIM condition visibility
+    const lastTimCond = (processNewProduct as any).__lastTimCondition;
+    if (lastTimCond && lastTimCond !== 'error') {
+      emitProgress(jobId, 'generate_description', 1, 2, `Found condition: ${lastTimCond} (from TIM)`);
+    } else {
+      emitProgress(jobId, 'generate_description', 1, 2, 'TIM condition: not available');
+    }
 
     if (!result.ready) {
       warn(`[AutoList] AI processing incomplete for product ${shopifyProductId}`);
@@ -384,11 +451,12 @@ export async function autoListProduct(
       };
     }
 
+    const descPreview = result.description.substring(0, 100) + (result.description.length > 100 ? '...' : '');
     await updatePipelineStep(
       jobId,
       'generate_description',
       'done',
-      `Description: ${result.description.length} chars, Category: ${result.ebayCategory}`,
+      `${result.description.length} chars — "${descPreview}"`,
     );
     await upsertPipelineStatus({
       aiDescriptionGenerated: true,
@@ -396,44 +464,7 @@ export async function autoListProduct(
       aiCategoryId: result.ebayCategory,
     });
 
-    // ── Step 2b: Apply TIM condition tag to Shopify ──────────────────
-    try {
-      const { findTimItemForProduct } = await import('../services/tim-matching.js');
-      const { applyConditionTag } = await import('../services/tim-tagging.js');
-      const skus = (product.variants ?? []).map((v: any) => v.sku).filter(Boolean);
-      const timData = await findTimItemForProduct(skus);
-      if (timData?.condition) {
-        const tagResult = await applyConditionTag(tokenRow.access_token, shopifyProductId, timData.condition);
-        if (tagResult.success && !tagResult.skipped) {
-          info(`[AutoList] Applied condition tag: ${tagResult.newTag} to product ${shopifyProductId}`);
-        }
-      }
-    } catch (err) {
-      // TIM tagging is non-fatal
-      logError(`[AutoList] TIM tagging failed (non-fatal): ${err}`);
-    }
-
-    // ── Step 2c: Search drive for product photos ─────────────────────
-    let driveImages: string[] = [];
-    try {
-      const { searchDriveForProduct, isDriveMounted, getSignedUrls } = await import('../watcher/drive-search.js');
-      if (isDriveMounted()) {
-        const sku = (product.variants?.[0] as any)?.sku ?? '';
-        const skuSuffix = sku.match(/(\d{2,4})$/)?.[1] ?? null;
-        const driveResult = await searchDriveForProduct(product.title || '', skuSuffix);
-        if (driveResult) {
-          // Get signed URLs for cloud mode, or use local paths
-          driveImages = await getSignedUrls(driveResult.imagePaths);
-          info(`[AutoList] Found ${driveImages.length} photos on drive: ${driveResult.presetName}/${driveResult.folderName}`);
-        } else {
-          info(`[AutoList] No drive photos found for "${product.title}"`);
-        }
-      }
-    } catch (driveErr) {
-      warn(`[AutoList] Drive search failed (non-fatal): ${driveErr}`);
-    }
-
-    // ── Step 3: Process images via PhotoRoom ───────────────────────────
+    // ── Step 5: Process images via PhotoRoom ───────────────────────────
     await updatePipelineStep(jobId, 'process_images', 'running');
 
     let processedImages: string[] = [];
@@ -445,6 +476,7 @@ export async function autoListProduct(
           const imageService = await getImageService();
           for (let i = 0; i < driveImages.length; i++) {
             try {
+              emitProgress(jobId, 'process_images', i + 1, driveImages.length, `Processing photo ${i + 1}/${driveImages.length} through PhotoRoom...`);
               info(`[AutoList] Processing drive photo ${i + 1}/${driveImages.length} through image service: ${driveImages[i].substring(0, 80)}`);
               // Full pipeline: bg removal → trim → uniform padding (400px closest edge) → template
               const result = await imageService.processWithUniformPadding(driveImages[i], {

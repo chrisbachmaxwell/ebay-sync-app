@@ -23,6 +23,7 @@ import {
   AlertTriangle,
   Loader2,
 } from 'lucide-react';
+import PipelineProgress from '../components/PipelineProgress';
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -238,6 +239,7 @@ const Pipeline: React.FC = () => {
     loading: boolean;
     result: null | { success: boolean; message: string; jobId?: string };
   }>({ loading: false, result: null });
+  const [activeJobIds, setActiveJobIds] = useState<string[]>([]);
 
   const handleRunPipeline = useCallback(async () => {
     const id = productId.trim();
@@ -247,14 +249,18 @@ const Pipeline: React.FC = () => {
       const res = await apiClient.post<{ jobId?: string; message?: string; error?: string }>(
         `/auto-list/${encodeURIComponent(id)}`,
       );
+      const newJobId = res.jobId;
       setTriggerStatus({
         loading: false,
         result: {
           success: true,
           message: res.message || 'Pipeline job started',
-          jobId: res.jobId,
+          jobId: newJobId,
         },
       });
+      if (newJobId) {
+        setActiveJobIds((prev) => (prev.includes(newJobId) ? prev : [newJobId, ...prev]));
+      }
     } catch (err: any) {
       setTriggerStatus({
         loading: false,
@@ -274,6 +280,19 @@ const Pipeline: React.FC = () => {
   });
 
   const jobs: PipelineJob[] = data?.jobs ?? [];
+
+  // Auto-track active jobs from query data
+  React.useEffect(() => {
+    const activeFromData = jobs
+      .filter((j) => j.status === 'processing' || j.status === 'queued')
+      .map((j) => j.id);
+    if (activeFromData.length > 0) {
+      setActiveJobIds((prev) => {
+        const combined = new Set([...prev, ...activeFromData]);
+        return Array.from(combined);
+      });
+    }
+  }, [jobs]);
   const isEmpty = jobs.length === 0;
 
   const missingTitleIds = React.useMemo(() => {
@@ -373,6 +392,31 @@ const Pipeline: React.FC = () => {
             </BlockStack>
           </div>
         </Card>
+        {/* Active pipeline progress */}
+        {activeJobIds.length > 0 && (
+          <Card>
+            <div style={{ padding: '16px' }}>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">
+                  Live Pipeline Progress
+                </Text>
+                {activeJobIds.map((jid) => (
+                  <PipelineProgress
+                    key={jid}
+                    jobId={jid}
+                    onComplete={() => {
+                      // Keep showing for 10s then remove
+                      setTimeout(() => {
+                        setActiveJobIds((prev) => prev.filter((id) => id !== jid));
+                      }, 10000);
+                    }}
+                  />
+                ))}
+              </BlockStack>
+            </div>
+          </Card>
+        )}
+
         {/* Stats bar */}
         <div className="pipeline-stats-bar">
           <div className="pipeline-stat">

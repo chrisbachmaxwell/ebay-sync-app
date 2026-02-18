@@ -24,6 +24,7 @@ import FeatureRequests from './pages/FeatureRequests';
 import FeatureAdmin from './pages/FeatureAdmin';
 import AppNavigation from './components/AppNavigation';
 import ChatWidget from './components/ChatWidget';
+import PipelineToasts from './components/PipelineToasts';
 import ReviewQueue from './pages/ReviewQueue';
 import ReviewDetail from './pages/ReviewDetail';
 import EbayOrders from './pages/EbayOrders';
@@ -143,6 +144,7 @@ const AppFrame: React.FC = () => {
         </ErrorBoundary>
 
         <ChatWidget />
+        <PipelineToasts />
       </Frame>
     </>
   );
