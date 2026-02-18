@@ -64,7 +64,7 @@ const Lightbox: React.FC<{
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 9999,
+        zIndex: 999999,
         backgroundColor: 'rgba(0,0,0,0.85)',
         display: 'flex',
         alignItems: 'center',

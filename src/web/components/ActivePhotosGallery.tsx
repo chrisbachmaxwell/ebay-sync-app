@@ -342,7 +342,7 @@ const ActivePhotosGallery: React.FC<ActivePhotosGalleryProps> = ({
           style={{
             position: 'fixed',
             inset: 0,
-            zIndex: 9999,
+            zIndex: 999999,
             backgroundColor: 'rgba(0,0,0,0.9)',
             display: 'flex',
             alignItems: 'center',
