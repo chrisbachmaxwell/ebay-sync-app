@@ -22,7 +22,13 @@ export interface DriveSearchResult {
   imagePaths: string[];
 }
 
-// ── Tokenization (same as shopify-matcher) ─────────────────────────────
+// ── Tokenization & Matching ────────────────────────────────────────────
+
+/** Extract a serial number (digits following #) from a string, or null. */
+function extractSerial(str: string): string | null {
+  const m = str.match(/#\s*(\d+)/);
+  return m ? m[1] : null;
+}
 
 function tokenize(str: string): string[] {
   return str
@@ -32,17 +38,52 @@ function tokenize(str: string): string[] {
     .filter(t => t.length > 0);
 }
 
-function tokenOverlap(queryTokens: string[], targetTokens: string[]): number {
-  if (queryTokens.length === 0) return 0;
-  const targetSet = new Set(targetTokens);
+/** What fraction of `from` tokens appear (exactly or as substring) in `in_` tokens. */
+function tokenOverlapDir(from: string[], in_: string[]): number {
+  if (from.length === 0) return 0;
   let matches = 0;
-  for (const token of queryTokens) {
-    if (targetSet.has(token)) { matches++; continue; }
-    for (const target of targetTokens) {
+  for (const token of from) {
+    if (in_.includes(token)) { matches++; continue; }
+    for (const target of in_) {
       if (target.includes(token) || token.includes(target)) { matches += 0.5; break; }
     }
   }
-  return matches / queryTokens.length;
+  return matches / from.length;
+}
+
+/**
+ * Score how well a folder matches a Shopify product name.
+ *
+ * Strategy:
+ * 1. If both have a serial number (#NNN) and they match → high confidence.
+ *    Check that remaining folder tokens exist in Shopify title. Score 0.95+ if they do.
+ * 2. If no serial → bidirectional token overlap, take the higher direction.
+ */
+function matchScore(shopifyName: string, folderName: string, folderSerial: string | null): number {
+  const shopifySerial = extractSerial(shopifyName);
+  const shopifyTokens = tokenize(shopifyName);
+  const folderTokens = tokenize(folderName);
+
+  // Serial-based matching
+  if (shopifySerial && folderSerial && shopifySerial === folderSerial) {
+    // Serial matches — verify folder tokens appear in shopify title
+    // Remove the serial digits from folder tokens for this check
+    const folderNonSerial = folderTokens.filter(t => t !== folderSerial);
+    if (folderNonSerial.length === 0) return 0.95; // only had serial
+    const overlap = tokenOverlapDir(folderNonSerial, shopifyTokens);
+    // Even partial overlap with serial match is strong
+    return 0.90 + (overlap * 0.10); // range: 0.90–1.0
+  }
+
+  // Serial mismatch (both have serials but different) → not a match
+  if (shopifySerial && folderSerial && shopifySerial !== folderSerial) {
+    return 0;
+  }
+
+  // No serial — bidirectional token overlap, take the higher score
+  const folder2shopify = tokenOverlapDir(folderTokens, shopifyTokens);
+  const shopify2folder = tokenOverlapDir(shopifyTokens, folderTokens);
+  return Math.max(folder2shopify, shopify2folder);
 }
 
 // ── Public API ─────────────────────────────────────────────────────────
@@ -76,9 +117,6 @@ export async function searchDriveForProduct(
     return null;
   }
 
-  const queryTokens = tokenize(productName);
-  const queryLower = productName.toLowerCase();
-
   let bestMatch: { result: DriveSearchResult; score: number } | null = null;
 
   try {
@@ -100,27 +138,9 @@ export async function searchDriveForProduct(
         if (!dir.isDirectory() || dir.name.startsWith('.')) continue;
 
         const parsed = parseFolderName(dir.name);
-        const folderTokens = tokenize(parsed.productName);
-        let score = 0;
+        const score = matchScore(productName, parsed.productName, parsed.serialSuffix);
 
-        // Exact substring match
-        if (parsed.productName.toLowerCase().includes(queryLower) ||
-            queryLower.includes(parsed.productName.toLowerCase())) {
-          score = 1.0;
-        } else {
-          // Token overlap
-          const overlap = tokenOverlap(queryTokens, folderTokens);
-          if (overlap >= 0.7) {
-            score = overlap;
-          }
-        }
-
-        // Serial suffix boost
-        if (score > 0 && serialSuffix && parsed.serialSuffix === serialSuffix) {
-          score += 0.5;
-        }
-
-        if (score > 0 && (!bestMatch || score > bestMatch.score)) {
+        if (score >= 0.7 && (!bestMatch || score > bestMatch.score)) {
           const folderPath = path.join(presetPath, dir.name);
           const imagePaths = collectImages(folderPath);
 
