@@ -175,16 +175,35 @@ const ProductPhotoEditor: React.FC<ProductPhotoEditorProps> = ({
       ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(0, 0, size, size);
 
+      // Calculate product dimensions
+      const imgAspect = img.width / img.height;
+      let drawW: number, drawH: number;
+      if (imgAspect > 1) { drawW = size * 0.8; drawH = drawW / imgAspect; }
+      else { drawH = size * 0.8; drawW = drawH * imgAspect; }
+
+      // Soft shadow under product (follows transform)
+      ctx.save();
+      ctx.translate(size / 2 + offsetX, size / 2 + offsetY);
+      ctx.rotate((rotation * Math.PI) / 180);
+      ctx.scale(scale, scale);
+      const shadowY = drawH / 2 + drawH * 0.02; // just below product bottom
+      const shadowW = drawW * 0.7;
+      const shadowH = drawH * 0.06;
+      const shadowGrad = ctx.createRadialGradient(0, shadowY, 0, 0, shadowY, shadowW * 0.6);
+      shadowGrad.addColorStop(0, 'rgba(0,0,0,0.15)');
+      shadowGrad.addColorStop(0.5, 'rgba(0,0,0,0.06)');
+      shadowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = shadowGrad;
+      ctx.beginPath();
+      ctx.ellipse(0, shadowY, shadowW, shadowH, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
       // Product image with transforms
       ctx.save();
       ctx.translate(size / 2 + offsetX, size / 2 + offsetY);
       ctx.rotate((rotation * Math.PI) / 180);
       ctx.scale(scale, scale);
-
-      const imgAspect = img.width / img.height;
-      let drawW: number, drawH: number;
-      if (imgAspect > 1) { drawW = size * 0.8; drawH = drawW / imgAspect; }
-      else { drawH = size * 0.8; drawW = drawH * imgAspect; }
       ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
       ctx.restore();
 
