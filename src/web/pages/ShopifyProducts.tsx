@@ -1393,6 +1393,7 @@ export const ShopifyProductDetail: React.FC = () => {
           open={true}
           imageUrl={editingPhoto.photo.src}
           imageIndex={editingPhoto.index}
+          productId={id}
           allDraftImages={activePhotos.map(p => p.src)}
           onSave={() => {
             queryClient.invalidateQueries({ queryKey: ['active-photos', id] });

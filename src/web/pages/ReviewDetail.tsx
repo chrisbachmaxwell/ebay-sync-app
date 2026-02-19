@@ -705,6 +705,7 @@ const ReviewDetail: React.FC = () => {
             addNotification({ type: 'success', title: 'Photo updated', message: 'Edited photo saved', autoClose: 4000 });
           }}
           onClose={() => setEditingPhotoIndex(null)}
+          productId={draft?.shopify_product_id}
         />
       )}
     </>

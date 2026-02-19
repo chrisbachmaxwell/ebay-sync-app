@@ -11,6 +11,7 @@ interface ProductPhotoEditorProps {
   onClose: () => void;
   open: boolean;
   onCustomSave?: (blob: Blob) => Promise<void>;
+  productId?: string; // Shopify product ID — used to find GCS cutout
 }
 
 interface Transform {
@@ -110,7 +111,7 @@ const sliderRowStyle: React.CSSProperties = {
 // ── Component ──────────────────────────────────────────────────────────
 
 const ProductPhotoEditor: React.FC<ProductPhotoEditorProps> = ({
-  imageUrl, draftId, imageIndex, allDraftImages, onSave, onClose, open, onCustomSave,
+  imageUrl, draftId, imageIndex, allDraftImages, onSave, onClose, open, onCustomSave, productId,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [productImg, setProductImg] = useState<HTMLImageElement | null>(null);
@@ -127,12 +128,6 @@ const ProductPhotoEditor: React.FC<ProductPhotoEditorProps> = ({
     if (!open || !imageUrl) return;
     setLoading(true);
     setError(null);
-
-    // Extract product ID and index from any URL (GCS or Shopify CDN)
-    const match = imageUrl.match(/(\d{10,})_(\d+)\.png/);
-    const gcsBase = match
-      ? `https://storage.googleapis.com/pictureline-product-photos/processed/${match[1]}_${match[2]}`
-      : null;
 
     const proxyGcs = (path: string) =>
       `/api/images/proxy?url=${encodeURIComponent(path)}`;
@@ -152,7 +147,15 @@ const ProductPhotoEditor: React.FC<ProductPhotoEditorProps> = ({
       img.src = url;
     };
 
-    // Priority: cutout (transparent) → clean (white bg) → original
+    // Build GCS base from productId prop OR regex from URL
+    const match = imageUrl.match(/(\d{10,})_(\d+)\.png/);
+    const pid = productId || (match ? match[1] : null);
+    const idx = match ? match[2] : String(imageIndex);
+    const gcsBase = pid
+      ? `https://storage.googleapis.com/pictureline-product-photos/processed/${pid}_${idx}`
+      : null;
+
+    // Priority: cutout (transparent bg) → clean (white bg) → original URL
     const urls: string[] = [];
     if (gcsBase) {
       urls.push(proxyGcs(`${gcsBase}_cutout.png`));
